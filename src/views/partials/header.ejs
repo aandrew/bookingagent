@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= typeof title !== 'undefined' ? title : 'Kooroo Agent' %></title>
+  <style>
+    :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f242d; --text:#e6e8eb; --muted:#8a93a3; --accent:#5ee0a7; --warn:#f0c674; --err:#e06c75; --line:#262c36; }
+    * { box-sizing: border-box; }
+    body { margin:0; font: 14px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header.top { display:flex; align-items:center; gap: 1rem; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    header.top h1 { font-size: 16px; margin:0; letter-spacing: .2px; }
+    header.top nav { display:flex; gap: 14px; margin-left: 1.5rem; }
+    header.top nav a { color: var(--muted); }
+    header.top nav a.active { color: var(--text); }
+    header.top .spacer { flex:1; }
+    header.top .who { color: var(--muted); font-size: 12px; }
+    main { padding: 18px; max-width: 1200px; margin: 0 auto; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+    .panel h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; }
+    tr:hover td { background: var(--panel2); }
+    .pill { display:inline-block; padding: 1px 8px; border-radius: 999px; background: var(--panel2); color: var(--muted); font-size: 11px; }
+    .pill.ok { background: rgba(94,224,167,.12); color: var(--accent); }
+    .pill.warn { background: rgba(240,198,116,.12); color: var(--warn); }
+    .pill.err { background: rgba(224,108,117,.12); color: var(--err); }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .row > .panel { flex: 1 1 320px; }
+    input[type=text], input[type=password], input[type=email], input[type=number], select, textarea {
+      background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; width: 100%;
+    }
+    label { display:block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+    button, .btn {
+      background: var(--accent); color: #0c1014; border: 0; border-radius: 6px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button.secondary, .btn.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+    button.danger { background: var(--err); color: #0c1014; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    pre { background: #0a0c10; color: #cfd5dd; padding: 10px; border-radius: 6px; overflow: auto; max-height: 280px; }
+    .muted { color: var(--muted); }
+    .flash { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
+    .flash.ok { background: rgba(94,224,167,.12); color: var(--accent); }
+    .flash.err { background: rgba(224,108,117,.12); color: var(--err); }
+    form.inline { display: inline; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <h1>🎾 Kooroo Agent</h1>
+    <% if (user) { %>
+      <nav>
+        <a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">Overview</a>
+        <a href="/accounts" class="<%= currentPath.startsWith('/accounts') ? 'active' : '' %>">Accounts</a>
+        <a href="/watches" class="<%= currentPath.startsWith('/watches') ? 'active' : '' %>">Watches</a>
+        <a href="/bookings" class="<%= currentPath.startsWith('/bookings') ? 'active' : '' %>">Bookings</a>
+        <a href="/audit" class="<%= currentPath.startsWith('/audit') ? 'active' : '' %>">Audit</a>
+        <a href="/settings" class="<%= currentPath.startsWith('/settings') ? 'active' : '' %>">Settings</a>
+      </nav>
+      <span class="spacer"></span>
+      <span class="who"><%= user.username %></span>
+      <form action="/logout" method="post" class="inline">
+        <button class="secondary" type="submit">Logout</button>
+      </form>
+    <% } %>
+  </header>
+  <main>
+    <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>

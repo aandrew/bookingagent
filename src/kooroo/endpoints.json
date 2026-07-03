@@ -1,0 +1,67 @@
+{
+  "version": 2,
+  "baseUrl": "https://www.kooroora.asn.au",
+  "auth": {
+    "login": {
+      "method": "POST",
+      "path": "/login/",
+      "contentType": "application/x-www-form-urlencoded",
+      "bodyShape": "form",
+      "headers": []
+    },
+    "logout": { "method": "GET", "path": "/logout/" },
+    "sessionProbe": {
+      "method": "GET",
+      "path": "/members-court-booking/",
+      "expectedStatus": 200
+    },
+    "paramsBootstrap": {
+      "method": "GET",
+      "path": "/members-court-booking/",
+      "extract": "tpcb_court_params"
+    }
+  },
+  "session": {
+    "type": "cookie",
+    "cookieNames": [
+      "wordpress_sec_*",
+      "wordpress_logged_in_*"
+    ],
+    "bearerHeader": null,
+    "csrfHeader": null,
+    "csrfCookie": null
+  },
+  "api": {
+    "endpoint": "https://www.kooroora.asn.au/wp-admin/admin-ajax.php",
+    "actions": {
+      "getDaySchedule":  { "name": "tpcb_get_day_schedule",   "params": ["date"] },
+      "createBooking":   { "name": "tpcb_create_booking",    "params": ["date", "from", "to", "court_id", "user_id", "first_day_of_week", "last_day_of_week"] },
+      "updateBooking":   { "name": "tpcb_update_booking",    "params": ["id", "from", "to", "date", "first_day_of_week", "last_day_of_week"] },
+      "deleteBooking":   { "name": "tpcb_delete_booking",    "params": ["id"] }
+    }
+  },
+  "schedule": {
+    "slotMinutes": 30,
+    "firstSlot": 1,
+    "lastSlot": 45,
+    "firstSlotTime": "00:30",
+    "lastSlotTime": "22:30",
+    "blockHours": 1,
+    "maxHoursPerBooking": 1.5,
+    "notes": "Slot 1 = 00:30. Slot 13 = 06:30. Slot 17 = 08:30 (verified with real booking)."
+  },
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/wp-admin/admin-ajax.php",
+      "purpose": "All booking operations",
+      "actions": [
+        "tpcb_get_day_schedule",
+        "tpcb_create_booking",
+        "tpcb_update_booking",
+        "tpcb_delete_booking"
+      ]
+    }
+  ],
+  "notes": "Plugin: Tennis Plus Court Booking. Time slots are 30-min units numbered from 1, with slot 13 = 06:30 and slot 45 = 22:30. user_id and contact_id are extracted from tpcb_court_params on the booking page after login."
+}

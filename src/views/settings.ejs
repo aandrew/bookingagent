@@ -1,0 +1,15 @@
+<%- include('partials/header', { title: 'Settings' }) %>
+<div class="panel">
+  <h2>Configuration</h2>
+  <pre><%- JSON.stringify({
+    kooroo: config.kooroo,
+    port: config.port,
+    pollCron: config.pollCron,
+    sessionProbeCron: config.sessionProbeCron,
+    defaultLeadDays: config.defaultLeadDays,
+    audit: config.audit,
+    nodeEnv: config.nodeEnv
+  }, null, 2) %></pre>
+  <p class="muted">Edit <code>.env</code> on the host and restart the container to change these.</p>
+</div>
+<%- include('partials/footer') %>

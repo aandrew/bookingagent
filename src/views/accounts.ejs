@@ -1,0 +1,70 @@
+<%- include('partials/header', { title: 'Accounts' }) %>
+<div class="panel">
+  <h2>Add account</h2>
+  <form id="addForm" onsubmit="addAccount(event)">
+    <div class="grid2">
+      <div><label>Label</label><input type="text" name="label" required></div>
+      <div><label>Username</label><input type="text" name="username" required></div>
+      <div><label>Password</label><input type="password" name="password" required></div>
+    </div>
+    <div style="margin-top: 10px;"><button type="submit">Add & test login</button></div>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Accounts</h2>
+  <table>
+    <thead><tr><th>#</th><th>Label</th><th>User</th><th>Enabled</th><th>Last login</th><th>Session</th><th></th></tr></thead>
+    <tbody>
+    <% accounts.forEach(function(a) { const s = sessionsById[a.id]; %>
+      <tr>
+        <td><%= a.id %></td>
+        <td><%= a.label %></td>
+        <td><%= a.username %></td>
+        <td><%= a.enabled ? 'yes' : 'no' %></td>
+        <td class="muted"><%= a.last_login_at || '—' %><% if (a.last_login_msg) { %> — <%= a.last_login_msg %><% } %></td>
+        <td>
+          <% if (s) { %><span class="pill ok">stored</span> <span class="muted">updated <%= s.updated_at %></span>
+          <% } else { %><span class="pill warn">none</span><% } %>
+        </td>
+        <td>
+          <button class="secondary" onclick="relogin(<%= a.id %>)">Re-login</button>
+          <button class="secondary" onclick="probe(<%= a.id %>)">Probe</button>
+          <button class="danger" onclick="removeAccount(<%= a.id %>)">Delete</button>
+        </td>
+      </tr>
+    <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  async function jsonReq(url, opts) {
+    const r = await fetch(url, { headers: { 'content-type': 'application/json' }, ...opts });
+    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    return r.json();
+  }
+  async function addAccount(e) {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      const a = await jsonReq('/api/accounts', { method: 'POST', body: JSON.stringify({ label: f.label.value, username: f.username.value, password: f.password.value }) });
+      await jsonReq('/api/accounts/' + a.id + '/relogin', { method: 'POST' });
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function relogin(id) {
+    try { const r = await jsonReq('/api/accounts/' + id + '/relogin', { method: 'POST' }); alert('Re-login: ' + JSON.stringify(r)); location.reload(); }
+    catch (e) { alert(e.message); }
+  }
+  async function probe(id) {
+    try { const r = await jsonReq('/api/accounts/' + id + '/probe', { method: 'POST' }); alert('Probe: ' + JSON.stringify(r)); }
+    catch (e) { alert(e.message); }
+  }
+  async function removeAccount(id) {
+    if (!confirm('Delete account #' + id + '?')) return;
+    try { await jsonReq('/api/accounts/' + id, { method: 'DELETE' }); location.reload(); }
+    catch (e) { alert(e.message); }
+  }
+</script>
+<%- include('partials/footer') %>

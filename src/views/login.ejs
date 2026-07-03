@@ -1,0 +1,15 @@
+<%- include('partials/header', { title: 'Login' }) %>
+<div class="panel" style="max-width: 380px; margin: 40px auto;">
+  <h2>Admin login</h2>
+  <% if (error) { %><div class="flash err"><%= error %></div><% } %>
+  <form method="post" action="/login">
+    <label>Username</label>
+    <input type="text" name="username" autofocus required>
+    <label>Password</label>
+    <input type="password" name="password" required>
+    <div style="margin-top: 14px;">
+      <button type="submit">Sign in</button>
+    </div>
+  </form>
+</div>
+<%- include('partials/footer') %>

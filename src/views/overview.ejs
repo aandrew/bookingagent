@@ -1,0 +1,99 @@
+<%- include('partials/header', { title: 'Overview' }) %>
+<div class="row">
+  <div class="panel">
+    <h2>Accounts</h2>
+    <table>
+      <thead><tr><th>#</th><th>Label</th><th>User</th><th>Status</th><th>Last check</th></tr></thead>
+      <tbody>
+      <% accounts.forEach(function(a) { %>
+        <tr>
+          <td><%= a.id %></td>
+          <td><%= a.label %></td>
+          <td><%= a.username %></td>
+          <td>
+            <% if (!a.enabled) { %><span class="pill">disabled</span>
+            <% } else if (a.last_login_ok === 1) { %><span class="pill ok">ok</span>
+            <% } else if (a.last_login_ok === 0) { %><span class="pill err">err</span>
+            <% } else { %><span class="pill">unknown</span><% } %>
+          </td>
+          <td class="muted"><%= a.last_check_at || '—' %></td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Active watches</h2>
+    <table>
+      <thead><tr><th>#</th><th>Label</th><th>Account</th><th>Strategy</th><th>Status</th></tr></thead>
+      <tbody>
+      <% watches.forEach(function(w) { %>
+        <tr>
+          <td><%= w.id %></td>
+          <td><%= w.label %></td>
+          <td>#<%= w.account_id %></td>
+          <td><span class="pill"><%= w.strategy %></span></td>
+          <td>
+            <% if (w.last_status === 'booked') { %><span class="pill ok">booked</span>
+            <% } else if (w.last_status === 'failed' || w.last_status === 'error') { %><span class="pill err"><%= w.last_status %></span>
+            <% } else if (w.last_status === 'no-match') { %><span class="pill warn">no-match</span>
+            <% } else { %><span class="pill"><%= w.last_status || 'idle' %></span><% } %>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Recent bookings</h2>
+  <table>
+    <thead><tr><th>#</th><th>Account</th><th>When</th><th>Court</th><th>Status</th><th>External ID</th><th>Created</th></tr></thead>
+    <tbody>
+    <% bookings.forEach(function(b) { %>
+      <tr>
+        <td><%= b.id %></td>
+        <td>#<%= b.account_id %></td>
+        <td><%= b.date %> <%= b.start_time %>–<%= b.end_time %></td>
+        <td><%= b.court || '' %></td>
+        <td>
+          <% if (b.status === 'confirmed') { %><span class="pill ok"><%= b.status %></span>
+          <% } else if (b.status === 'cancelled') { %><span class="pill warn"><%= b.status %></span>
+          <% } else { %><span class="pill err"><%= b.status %></span><% } %>
+        </td>
+        <td class="muted"><%= b.external_id || '' %></td>
+        <td class="muted"><%= b.created_at %></td>
+      </tr>
+    <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Recent API calls</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Account</th><th>Method</th><th>URL</th><th>Status</th><th>Latency</th></tr></thead>
+    <tbody>
+    <% recentAudit.forEach(function(a) { %>
+      <tr>
+        <td class="muted"><%= a.ts %></td>
+        <td><%= a.account_id ? '#' + a.account_id : '' %></td>
+        <td><%= a.method || '' %></td>
+        <td class="muted"><%= a.url || '' %></td>
+        <td><% if (a.status && a.status >= 400) { %><span class="pill err"><%= a.status %></span><% } else if (a.status) { %><span class="pill ok"><%= a.status %></span><% } else { %><span class="pill"><%= a.error || '' %></span><% } %></td>
+        <td class="muted"><%= a.latency_ms ? a.latency_ms + 'ms' : '' %></td>
+      </tr>
+    <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Trigger</h2>
+  <form method="post" action="/api/monitor/run" onsubmit="event.preventDefault(); fetch('/api/monitor/run',{method:'POST'}).then(r=>r.json()).then(j=>alert(JSON.stringify(j))).catch(e=>alert(e))">
+    <button type="submit">Run monitor now</button>
+  </form>
+</div>
+<%- include('partials/footer') %>

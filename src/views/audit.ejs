@@ -1,0 +1,21 @@
+<%- include('partials/header', { title: 'Audit' }) %>
+<div class="panel">
+  <h2>Audit log</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Account</th><th>Method</th><th>URL</th><th>Status</th><th>Latency</th><th>Error</th></tr></thead>
+    <tbody>
+    <% entries.forEach(function(a) { %>
+      <tr>
+        <td class="muted"><%= a.ts %></td>
+        <td><%= a.account_id ? '#' + a.account_id : '' %></td>
+        <td><%= a.method || '' %></td>
+        <td class="muted"><%= a.url || '' %></td>
+        <td><% if (a.status && a.status >= 400) { %><span class="pill err"><%= a.status %></span><% } else if (a.status) { %><span class="pill ok"><%= a.status %></span><% } else { %>—<% } %></td>
+        <td class="muted"><%= a.latency_ms ? a.latency_ms + 'ms' : '' %></td>
+        <td class="muted"><%= a.error || '' %></td>
+      </tr>
+    <% }) %>
+    </tbody>
+  </table>
+</div>
+<%- include('partials/footer') %>

@@ -1,0 +1,7 @@
+boomercheugys.com {
+    reverse_proxy app:3000
+    encode gzip zstd
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+}
