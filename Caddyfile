@@ -5,3 +5,11 @@ bookings.boomercheugys.com {
         dns cloudflare {env.CF_API_TOKEN}
     }
 }
+
+hermes.boomercheugys.com {
+    reverse_proxy 172.18.0.1:3000
+    encode gzip zstd
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+}
