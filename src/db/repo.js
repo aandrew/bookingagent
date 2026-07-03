@@ -46,6 +46,17 @@ const accounts = {
     db.get().prepare(`UPDATE accounts SET last_check_at = ?, updated_at = ? WHERE id = ?`)
       .run(nowIso(), nowIso(), id);
   },
+  setState(id, state, msg = null) {
+    db.get().prepare(
+      `UPDATE accounts SET state = ?, state_msg = ?, state_updated_at = ?, updated_at = ? WHERE id = ?`
+    ).run(state, msg, nowIso(), nowIso(), id);
+    return accounts.get(id);
+  },
+  setSessionExpiry(id, expiresAt) {
+    db.get().prepare(
+      `UPDATE accounts SET session_expires_at = ?, updated_at = ? WHERE id = ?`
+    ).run(expiresAt, nowIso(), id);
+  },
 };
 
 const sessions = {
@@ -121,11 +132,11 @@ const bookings = {
   },
   create(b) {
     const stmt = db.get().prepare(
-      `INSERT INTO bookings (account_id, watch_id, court, date, start_time, end_time, status, external_id, raw_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO bookings (account_id, watch_id, recurring_id, court, date, start_time, end_time, status, external_id, raw_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const info = stmt.run(
-      b.account_id, b.watch_id || null, b.court || null, b.date || null,
+      b.account_id, b.watch_id || null, b.recurring_id || null, b.court || null, b.date || null,
       b.start_time || null, b.end_time || null, b.status, b.external_id || null,
       b.raw_json ? JSON.stringify(b.raw_json) : null, nowIso()
     );
@@ -142,6 +153,111 @@ const bookings = {
     vals.push(id);
     db.get().prepare(`UPDATE bookings SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
     return bookings.get(id);
+  },
+  listForRecurring(recurringId, limit = 50) {
+    return db.get().prepare(`SELECT * FROM bookings WHERE recurring_id = ? ORDER BY id DESC LIMIT ?`).all(recurringId, limit);
+  },
+};
+
+const recurring = {
+  list({ enabled = null, accountId = null } = {}) {
+    let q = `SELECT * FROM recurring_bookings`;
+    const args = [];
+    const conds = [];
+    if (enabled !== null) { conds.push('enabled = ?'); args.push(enabled ? 1 : 0); }
+    if (accountId) { conds.push('account_id = ?'); args.push(accountId); }
+    if (conds.length) q += ` WHERE ${conds.join(' AND ')}`;
+    q += ` ORDER BY id ASC`;
+    return db.get().prepare(q).all(...args);
+  },
+  get(id) {
+    return db.get().prepare(`SELECT * FROM recurring_bookings WHERE id = ?`).get(id);
+  },
+  create(r) {
+    const stmt = db.get().prepare(
+      `INSERT INTO recurring_bookings (account_id, label, court_pref, courts, day_of_week, time, duration_mins, lead_minutes, enabled, first_occurrence_action, next_fire_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const info = stmt.run(
+      r.account_id, r.label, r.court_pref, JSON.stringify(r.courts || [r.court_pref]),
+      r.day_of_week, r.time, r.duration_mins || 60, r.lead_minutes || 10,
+      r.enabled === false ? 0 : 1,
+      r.first_occurrence_action || null, r.next_fire_at || null,
+      nowIso(), nowIso()
+    );
+    return recurring.get(info.lastInsertRowid);
+  },
+
+  update(id, fields) {
+    const allowed = ['label', 'court_pref', 'courts', 'day_of_week', 'time', 'duration_mins', 'lead_minutes', 'enabled', 'next_fire_at', 'last_fire_at', 'last_status', 'last_msg', 'last_error_category', 'error_dismissed_at', 'first_occurrence_action'];
+    const sets = []; const vals = [];
+    for (const k of allowed) if (k in fields) {
+      sets.push(`${k} = ?`);
+      vals.push(k === 'courts' ? JSON.stringify(fields[k]) : fields[k]);
+    }
+    if (!sets.length) return recurring.get(id);
+    sets.push('updated_at = ?'); vals.push(nowIso()); vals.push(id);
+    db.get().prepare(`UPDATE recurring_bookings SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    return recurring.get(id);
+  },
+  remove(id) {
+    db.get().prepare(`DELETE FROM recurring_bookings WHERE id = ?`).run(id);
+  },
+  setNextFire(id, nextFireAt) {
+    return recurring.update(id, { next_fire_at: nextFireAt });
+  },
+  setLastResult(id, { status, msg, category }) {
+    return recurring.update(id, {
+      last_fire_at: nowIso(),
+      last_status: status,
+      last_msg: msg,
+      last_error_category: category || null,
+    });
+  },
+  dismissError(id) {
+    return recurring.update(id, { error_dismissed_at: nowIso() });
+  },
+  // For the banner: any enabled recurring with an un-dismissed error
+  listUnacknowledgedErrors() {
+    return db.get().prepare(`
+      SELECT r.*, a.label AS account_label, a.username AS account_username
+      FROM recurring_bookings r
+      JOIN accounts a ON a.id = r.account_id
+      WHERE r.enabled = 1
+        AND r.last_status IS NOT NULL
+        AND r.last_status IN ('no_time_available', 'technical_error', 'failed', 'login_required')
+        AND (r.error_dismissed_at IS NULL OR r.error_dismissed_at < r.last_fire_at)
+      ORDER BY r.last_fire_at DESC
+    `).all();
+  },
+};
+
+const fireEvents = {
+  create(e) {
+    const stmt = db.get().prepare(
+      `INSERT INTO fire_events (recurring_id, account_id, scheduled_at, fired_at, status, attempt, court_attempted, court_booked, date, time, latency_ms, response_status, response_body, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const info = stmt.run(
+      e.recurring_id || null, e.account_id || null, e.scheduled_at, e.fired_at || null,
+      e.status, e.attempt || 1, e.court_attempted || null, e.court_booked || null,
+      e.date || null, e.time || null, e.latency_ms || null, e.response_status || null,
+      e.response_body ? String(e.response_body).slice(0, 200_000) : null,
+      e.error || null, nowIso()
+    );
+    return fireEvents.get(info.lastInsertRowid);
+  },
+  get(id) { return db.get().prepare(`SELECT * FROM fire_events WHERE id = ?`).get(id); },
+  list({ limit = 100, recurringId = null, accountId = null, status = null } = {}) {
+    let q = `SELECT * FROM fire_events`;
+    const args = [];
+    const conds = [];
+    if (recurringId) { conds.push('recurring_id = ?'); args.push(recurringId); }
+    if (accountId) { conds.push('account_id = ?'); args.push(accountId); }
+    if (status) { conds.push('status = ?'); args.push(status); }
+    if (conds.length) q += ` WHERE ${conds.join(' AND ')}`;
+    q += ` ORDER BY id DESC LIMIT ?`; args.push(limit);
+    return db.get().prepare(q).all(...args);
   },
 };
 
@@ -171,4 +287,4 @@ const audit = {
   },
 };
 
-module.exports = { accounts, sessions, watches, bookings, audit };
+module.exports = { accounts, sessions, watches, bookings, audit, recurring, fireEvents };

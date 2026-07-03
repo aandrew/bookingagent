@@ -1,3 +1,44 @@
   </main>
+  <script>
+    async function jsonReq(url, opts) {
+      const r = await fetch(url, { headers: { 'content-type': 'application/json' }, ...opts });
+      if (!r.ok) {
+        let msg = r.statusText;
+        try { const j = await r.json(); msg = j.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      return r.json();
+    }
+    async function fireNowBtn(id) {
+      try { const r = await jsonReq('/api/recurring/' + id + '/fire-now', { method: 'POST' }); alert('Fire: ' + JSON.stringify(r)); location.reload(); }
+      catch (e) { alert(e.message); }
+    }
+    async function dismissError(id) {
+      try { await jsonReq('/api/recurring/' + id + '/dismiss-error', { method: 'POST' }); location.reload(); }
+      catch (e) { alert(e.message); }
+    }
+    async function toggleRecurring(id, enabled) {
+      try { await jsonReq('/api/recurring/' + id, { method: 'PATCH', body: JSON.stringify({ enabled }) }); location.reload(); }
+      catch (e) { alert(e.message); }
+    }
+    // Live countdown refresh: walk every [data-fire-at] element and update.
+    (function tickCountdowns() {
+      const els = document.querySelectorAll('[data-fire-at]');
+      if (!els.length) return;
+      const now = Date.now();
+      els.forEach(el => {
+        const t = parseInt(el.dataset.fireAt, 10);
+        if (!Number.isFinite(t)) return;
+        const d = t - now;
+        if (d <= 0) { el.textContent = 'now'; el.classList.add('warn'); return; }
+        const days = Math.floor(d / 86_400_000);
+        const hours = Math.floor((d % 86_400_000) / 3_600_000);
+        const mins = Math.floor((d % 3_600_000) / 60_000);
+        const secs = Math.floor((d % 60_000) / 1000);
+        el.textContent = `${days}d ${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+      });
+      setTimeout(tickCountdowns, 1000);
+    })();
+  </script>
 </body>
 </html>

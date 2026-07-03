@@ -1,0 +1,110 @@
+<%- include('partials/header', { title: 'Recurring bookings' }) %>
+<div class="panel">
+  <h2>Add recurring</h2>
+  <form id="addRecurring" onsubmit="addRecurring(event)">
+    <div class="grid2">
+      <div><label>Account</label>
+        <select name="account_id" required>
+          <% accounts.forEach(function(a) { %><option value="<%= a.id %>"><%= a.label %> (<%= a.username %>) — <%= a.state || 'waiting' %></option><% }) %>
+        </select>
+      </div>
+      <div><label>Label</label><input type="text" name="label" required placeholder="e.g. Wed 7pm Court 4"></div>
+      <div><label>Day of week</label>
+        <select name="day_of_week" required>
+          <option value="0">Sunday</option>
+          <option value="1">Monday</option>
+          <option value="2">Tuesday</option>
+          <option value="3" selected>Wednesday</option>
+          <option value="4">Thursday</option>
+          <option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </div>
+      <div><label>Time (Sydney)</label><input type="time" name="time" required value="19:00"></div>
+      <div><label>Court preference</label>
+        <select name="court_pref" required>
+          <option value="4">Court 4 (C4)</option>
+          <option value="5" selected>Court 5 (C5)</option>
+          <option value="6">Court 6 (C6)</option>
+        </select>
+      </div>
+      <div><label>Duration (mins)</label><input type="number" name="duration_mins" value="60" min="30" step="30"></div>
+      <div><label>Lead minutes (warm before fire)</label><input type="number" name="lead_minutes" value="10" min="1" max="60"></div>
+      <div><label>Fall back to other courts</label>
+        <label style="display:inline-block;margin-right:14px;"><input type="checkbox" name="fb_5" checked> Court 5</label>
+        <label style="display:inline-block;"><input type="checkbox" name="fb_6" checked> Court 6</label>
+      </div>
+    </div>
+    <p class="muted" style="font-size: 12px;">If the first occurrence is within 7 days, the system will book it immediately. Otherwise it will wait for the 7-day-out release moment.</p>
+    <div style="margin-top: 10px;"><button type="submit">Add</button></div>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Recurring</h2>
+  <table>
+    <thead><tr><th>#</th><th>Label</th><th>Account</th><th>Pattern</th><th>First action</th><th>Next fire</th><th>Last result</th><th>Enabled</th><th></th></tr></thead>
+    <tbody>
+    <% recurringRows.forEach(function(r) { %>
+      <tr>
+        <td><%= r.id %></td>
+        <td><a href="/recurring/<%= r.id %>"><%= r.label %></a></td>
+        <td>#<%= r.account_id %></td>
+        <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %> <%= r.duration_mins %>m <% if (r.courts.length > 1) { %>+ fb<%= r.courts.filter(c => c !== r.court_pref).join(',') %><% } %></td>
+        <td>
+          <% if (r.first_occurrence_action === 'book_now') { %><span class="pill warn">immediate</span>
+          <% } else if (r.first_occurrence_action === 'resolved') { %><span class="pill ok">resolved</span>
+          <% } else { %><span class="pill info">scheduled</span><% } %>
+        </td>
+        <td>
+          <% if (r.next_fire_at) { %><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span>
+          <% } else { %>—<% } %>
+        </td>
+        <td>
+          <% if (r.last_status === 'booked') { %><span class="pill ok">booked</span>
+          <% } else if (r.last_status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
+          <% } else if (r.last_status === 'technical_error' || r.last_status === 'failed') { %><span class="pill err">technical_error</span>
+          <% } else if (r.last_status) { %><span class="pill"><%= r.last_status %></span>
+          <% } else { %>—<% } %>
+          <% if (r.last_msg) { %><div class="muted" style="font-size:11px;"><%= r.last_msg %></div><% } %>
+        </td>
+        <td><%= r.enabled ? 'yes' : 'no' %></td>
+        <td>
+          <button class="secondary" onclick="fireNowBtn(<%= r.id %>)">Fire now</button>
+          <button class="secondary" onclick="toggleRecurring(<%= r.id %>, <%= !r.enabled %>)"><%= r.enabled ? 'Disable' : 'Enable' %></button>
+          <button class="danger" onclick="removeRecurring(<%= r.id %>)">Delete</button>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (!recurringRows.length) { %><tr><td colspan="8" class="muted">No recurring bookings yet.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  async function addRecurring(e) {
+    e.preventDefault();
+    const f = e.target;
+    const body = {
+      account_id: parseInt(f.account_id.value, 10),
+      label: f.label.value,
+      day_of_week: parseInt(f.day_of_week.value, 10),
+      time: f.time.value,
+      court_pref: f.court_pref.value,
+      duration_mins: parseInt(f.duration_mins.value, 10),
+      lead_minutes: parseInt(f.lead_minutes.value, 10),
+      courts: [f.court_pref.value, ...(f.fb_5.checked ? ['5'] : []), ...(f.fb_6.checked ? ['6'] : [])].filter((v, i, a) => a.indexOf(v) === i),
+    };
+    try {
+      const r = await jsonReq('/api/recurring', { method: 'POST', body: JSON.stringify(body) });
+      alert('Created recurring #' + r.id + ' (' + r.first_occurrence_action + ')');
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function removeRecurring(id) {
+    if (!confirm('Delete recurring #' + id + '?')) return;
+    try { await jsonReq('/api/recurring/' + id, { method: 'DELETE' }); location.reload(); }
+    catch (e) { alert(e.message); }
+  }
+</script>
+<%- include('partials/footer') %>

@@ -3,27 +3,17 @@
 const cron = require('node-cron');
 const config = require('../config');
 const log = require('../logger');
-const monitor = require('./monitor');
 const pool = require('./pool');
 const repo = require('../db/repo');
+const scheduler = require('./scheduler');
 
-let monitorTask;
 let probeTask;
 let auditTask;
 
 function start() {
-  if (!monitorTask) {
-    monitorTask = cron.schedule(config.pollCron, async () => {
-      const t0 = Date.now();
-      try {
-        const r = await monitor.runAll();
-        log.info('cron.monitor', { count: r.length, ms: Date.now() - t0 });
-      } catch (e) {
-        log.error('cron.monitor.error', { error: e.message });
-      }
-    });
-    log.info('cron.monitor.started', { expr: config.pollCron });
-  }
+  // Sub-second scheduler for recurring bookings
+  scheduler.start();
+  // Session probe every 10 min (re-login if needed)
   if (!probeTask) {
     probeTask = cron.schedule(config.sessionProbeCron, async () => {
       try {
@@ -35,6 +25,7 @@ function start() {
     });
     log.info('cron.probe.started', { expr: config.sessionProbeCron });
   }
+  // Daily audit prune at 03:00
   if (!auditTask) {
     auditTask = cron.schedule('0 3 * * *', () => {
       try {
@@ -49,10 +40,11 @@ function start() {
 }
 
 function stop() {
-  for (const t of [monitorTask, probeTask, auditTask]) {
+  scheduler.stop();
+  for (const t of [probeTask, auditTask]) {
     try { t?.stop?.(); } catch {}
   }
-  monitorTask = probeTask = auditTask = undefined;
+  probeTask = auditTask = undefined;
   pool.shutdown();
 }
 

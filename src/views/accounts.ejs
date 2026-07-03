@@ -1,6 +1,7 @@
 <%- include('partials/header', { title: 'Accounts' }) %>
 <div class="panel">
   <h2>Add account</h2>
+  <p class="muted" style="font-size: 12px;">On add, the system will run a browser re-login to verify the credentials. If it works the state moves to <code>tested_ok</code> immediately; if it fails you'll see the error in the state column.</p>
   <form id="addForm" onsubmit="addAccount(event)">
     <div class="grid2">
       <div><label>Label</label><input type="text" name="label" required></div>
@@ -14,19 +15,24 @@
 <div class="panel">
   <h2>Accounts</h2>
   <table>
-    <thead><tr><th>#</th><th>Label</th><th>User</th><th>Enabled</th><th>Last login</th><th>Session</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Label</th><th>User</th><th>State</th><th>Session</th><th>Enabled</th><th></th></tr></thead>
     <tbody>
     <% accounts.forEach(function(a) { const s = sessionsById[a.id]; %>
       <tr>
         <td><%= a.id %></td>
         <td><%= a.label %></td>
         <td><%= a.username %></td>
-        <td><%= a.enabled ? 'yes' : 'no' %></td>
-        <td class="muted"><%= a.last_login_at || '—' %><% if (a.last_login_msg) { %> — <%= a.last_login_msg %><% } %></td>
+        <td>
+          <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(a.state)) cls='err'; else if (['primed','firing','first_immediate'].includes(a.state)) cls='warn'; else if (['token_ready','tested_ok'].includes(a.state)) cls='info'; %>
+          <span class="pill <%= cls %>"><%= a.state || 'waiting' %></span>
+          <% if (a.state_msg) { %><div class="muted" style="font-size:11px;"><%= a.state_msg %></div><% } %>
+          <% if (a.session_expires_at) { %><div class="muted" style="font-size:11px;">session expires: <%= a.session_expires_at %></div><% } %>
+        </td>
         <td>
           <% if (s) { %><span class="pill ok">stored</span> <span class="muted">updated <%= s.updated_at %></span>
           <% } else { %><span class="pill warn">none</span><% } %>
         </td>
+        <td><%= a.enabled ? 'yes' : 'no' %></td>
         <td>
           <button class="secondary" onclick="relogin(<%= a.id %>)">Re-login</button>
           <button class="secondary" onclick="probe(<%= a.id %>)">Probe</button>
@@ -39,17 +45,12 @@
 </div>
 
 <script>
-  async function jsonReq(url, opts) {
-    const r = await fetch(url, { headers: { 'content-type': 'application/json' }, ...opts });
-    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
-    return r.json();
-  }
   async function addAccount(e) {
     e.preventDefault();
     const f = e.target;
     try {
       const a = await jsonReq('/api/accounts', { method: 'POST', body: JSON.stringify({ label: f.label.value, username: f.username.value, password: f.password.value }) });
-      await jsonReq('/api/accounts/' + a.id + '/relogin', { method: 'POST' });
+      alert('Added #' + a.id + ' — test: ' + JSON.stringify(a.test));
       location.reload();
     } catch (e) { alert(e.message); }
   }

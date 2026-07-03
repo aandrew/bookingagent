@@ -1,4 +1,4 @@
--- Kooroo Booking Agent schema
+-- Kooroo Booking Agent schema (v2.1)
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
 
+-- v2.1: account state machine columns
+-- (added via migrate() in index.js for upgrades; declared here for fresh installs)
 CREATE TABLE IF NOT EXISTS sessions (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id      INTEGER NOT NULL UNIQUE REFERENCES accounts(id) ON DELETE CASCADE,
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS bookings (
 );
 CREATE INDEX IF NOT EXISTS idx_bookings_account ON bookings(account_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
+-- idx_bookings_recurring added in migrate() for upgrades; declared here for fresh installs is harmless because of IF NOT EXISTS
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,3 +84,52 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_account ON audit_log(account_id);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+
+-- v2.1: recurring booking patterns
+CREATE TABLE IF NOT EXISTS recurring_bookings (
+  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id              INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  label                   TEXT NOT NULL,
+  court_pref              TEXT NOT NULL,
+  courts                  TEXT NOT NULL,
+  day_of_week             INTEGER NOT NULL,
+  time                    TEXT NOT NULL,
+  duration_mins           INTEGER NOT NULL DEFAULT 60,
+  lead_minutes            INTEGER NOT NULL DEFAULT 10,
+  enabled                 INTEGER NOT NULL DEFAULT 1,
+  next_fire_at            TEXT,
+  last_fire_at            TEXT,
+  last_status             TEXT,
+  last_msg                TEXT,
+  last_error_category     TEXT,
+  error_dismissed_at      TEXT,
+  first_occurrence_action TEXT,
+  created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_account ON recurring_bookings(account_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_enabled ON recurring_bookings(enabled);
+CREATE INDEX IF NOT EXISTS idx_recurring_next_fire ON recurring_bookings(next_fire_at);
+
+-- v2.1: fire events
+CREATE TABLE IF NOT EXISTS fire_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  recurring_id    INTEGER REFERENCES recurring_bookings(id) ON DELETE SET NULL,
+  account_id      INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+  scheduled_at    TEXT NOT NULL,
+  fired_at        TEXT,
+  status          TEXT NOT NULL,
+  attempt         INTEGER NOT NULL DEFAULT 1,
+  court_attempted TEXT,
+  court_booked    TEXT,
+  date            TEXT,
+  time            TEXT,
+  latency_ms      INTEGER,
+  response_status INTEGER,
+  response_body   TEXT,
+  error           TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fire_events_recurring ON fire_events(recurring_id);
+CREATE INDEX IF NOT EXISTS idx_fire_events_scheduled ON fire_events(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_fire_events_status ON fire_events(status);

@@ -1,7 +1,7 @@
 <%- include('partials/header', { title: 'Watches' }) %>
 <div class="panel">
-  <h2>Add watch</h2>
-  <form id="addWatch" onsubmit="addWatch(event)">
+  <h2>Add watch / one-off booking</h2>
+  <form id="addForm" onsubmit="addWatch(event)">
     <div class="grid2">
       <div><label>Account</label>
         <select name="account_id" required>
@@ -9,7 +9,14 @@
         </select>
       </div>
       <div><label>Label</label><input type="text" name="label" required></div>
-      <div><label>Court (optional)</label><input type="text" name="court"></div>
+      <div><label>Court (optional)</label>
+        <select name="court">
+          <option value="">— any —</option>
+          <option value="4">Court 4</option>
+          <option value="5">Court 5</option>
+          <option value="6">Court 6</option>
+        </select>
+      </div>
       <div><label>Strategy</label>
         <select name="strategy"><option value="watch">watch</option><option value="scheduled">scheduled</option></select>
       </div>
@@ -19,6 +26,21 @@
       <div><label>Time end</label><input type="text" name="time_end" placeholder="HH:MM"></div>
       <div><label>Lead days</label><input type="number" name="lead_days" value="7"></div>
       <div><label>Duration (mins)</label><input type="number" name="duration_mins" value="60"></div>
+    </div>
+    <div style="margin-top: 10px;">
+      <label style="display:inline-block; font-size: 14px; color: var(--text); margin: 0;">
+        <input type="checkbox" id="makeRecurring" onchange="document.getElementById('recurringFields').classList.toggle('hidden', !this.checked)">
+        Make this a <strong>recurring</strong> weekly booking
+      </label>
+    </div>
+    <div id="recurringFields" class="hidden grid2" style="margin-top: 8px;">
+      <div><label>Day of week (recurring)</label>
+        <select name="recurring_day_of_week">
+          <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
+          <option value="3" selected>Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+        </select>
+      </div>
+      <div><label>Time (recurring, Sydney)</label><input type="time" name="recurring_time" value="19:00"></div>
     </div>
     <div style="margin-top: 10px;"><button type="submit">Add</button></div>
   </form>
@@ -54,12 +76,30 @@
 </div>
 
 <script>
-  async function jsonReq(url, opts) { const r = await fetch(url, { headers: { 'content-type': 'application/json' }, ...opts }); if (!r.ok) throw new Error((await r.json()).error || r.statusText); return r.json(); }
   async function addWatch(e) {
     e.preventDefault();
     const f = e.target;
+    const recurringOn = f.makeRecurring?.checked;
+    if (recurringOn) {
+      const body = {
+        account_id: parseInt(f.account_id.value, 10),
+        label: f.label.value,
+        day_of_week: parseInt(f.recurring_day_of_week.value, 10),
+        time: f.recurring_time.value,
+        court_pref: f.court.value || '5',
+        duration_mins: parseInt(f.duration_mins.value, 10) || 60,
+        courts: [f.court.value || '5', '5', '6'].filter((v, i, a) => v && a.indexOf(v) === i),
+      };
+      try {
+        const r = await jsonReq('/api/recurring', { method: 'POST', body: JSON.stringify(body) });
+        alert('Created recurring #' + r.id + ' (' + r.first_occurrence_action + ')');
+        location.href = '/recurring';
+      } catch (e) { alert(e.message); }
+      return;
+    }
+    // one-off watch
     const body = {};
-    for (const el of f.elements) if (el.name) body[el.name] = el.value;
+    for (const el of f.elements) if (el.name && !el.name.startsWith('recurring_')) body[el.name] = el.value;
     try { await jsonReq('/api/watches', { method: 'POST', body: JSON.stringify(body) }); location.reload(); }
     catch (e) { alert(e.message); }
   }

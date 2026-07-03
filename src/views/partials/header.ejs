@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%= typeof title !== 'undefined' ? title : 'Kooroo Agent' %></title>
   <style>
-    :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f242d; --text:#e6e8eb; --muted:#8a93a3; --accent:#5ee0a7; --warn:#f0c674; --err:#e06c75; --line:#262c36; }
+    :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f242d; --text:#e6e8eb; --muted:#8a93a3; --accent:#5ee0a7; --warn:#f0c674; --err:#e06c75; --line:#262c36; --info:#7ebec5; }
     * { box-sizing: border-box; }
     body { margin:0; font: 14px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    header.top { display:flex; align-items:center; gap: 1rem; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    header.top { display:flex; align-items:center; gap: 1rem; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
     header.top h1 { font-size: 16px; margin:0; letter-spacing: .2px; }
     header.top nav { display:flex; gap: 14px; margin-left: 1.5rem; }
     header.top nav a { color: var(--muted); }
@@ -28,9 +28,10 @@
     .pill.ok { background: rgba(94,224,167,.12); color: var(--accent); }
     .pill.warn { background: rgba(240,198,116,.12); color: var(--warn); }
     .pill.err { background: rgba(224,108,117,.12); color: var(--err); }
+    .pill.info { background: rgba(126,190,197,.12); color: var(--info); }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > .panel { flex: 1 1 320px; }
-    input[type=text], input[type=password], input[type=email], input[type=number], select, textarea {
+    input[type=text], input[type=password], input[type=email], input[type=number], input[type=time], input[type=date], select, textarea {
       background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; width: 100%;
     }
     label { display:block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
@@ -46,6 +47,14 @@
     .flash.ok { background: rgba(94,224,167,.12); color: var(--accent); }
     .flash.err { background: rgba(224,108,117,.12); color: var(--err); }
     form.inline { display: inline; }
+    .error-banner { background: rgba(224,108,117,.12); border: 1px solid #e06c75; color: #e06c75; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+    .error-banner .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .error-banner .actions button { background: transparent; color: #e06c75; border: 1px solid #e06c75; padding: 4px 10px; }
+    .error-banner .actions button.danger { background: #e06c75; color: #0c1014; border-color: #e06c75; }
+    .countdown { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    details { background: var(--panel2); border-radius: 6px; padding: 6px 10px; }
+    details summary { cursor: pointer; color: var(--muted); }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
@@ -54,9 +63,11 @@
     <% if (user) { %>
       <nav>
         <a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">Overview</a>
+        <a href="/recurring" class="<%= currentPath.startsWith('/recurring') ? 'active' : '' %>">Recurring</a>
         <a href="/accounts" class="<%= currentPath.startsWith('/accounts') ? 'active' : '' %>">Accounts</a>
         <a href="/watches" class="<%= currentPath.startsWith('/watches') ? 'active' : '' %>">Watches</a>
         <a href="/bookings" class="<%= currentPath.startsWith('/bookings') ? 'active' : '' %>">Bookings</a>
+        <a href="/fire-events" class="<%= currentPath.startsWith('/fire-events') ? 'active' : '' %>">Fires</a>
         <a href="/audit" class="<%= currentPath.startsWith('/audit') ? 'active' : '' %>">Audit</a>
         <a href="/settings" class="<%= currentPath.startsWith('/settings') ? 'active' : '' %>">Settings</a>
       </nav>
@@ -68,4 +79,18 @@
     <% } %>
   </header>
   <main>
+    <% if (user && typeof activeErrors !== 'undefined' && activeErrors && activeErrors.length) { %>
+      <% activeErrors.forEach(function(err) { %>
+        <div class="error-banner" data-recurring-id="<%= err.id %>">
+          <strong>⚠ "<%= err.label %>"</strong> — <%= err.last_msg || err.last_status %> <% if (err.last_error_category === 'no_time_available') { %><span class="pill warn">no_time_available</span><% } else if (err.last_error_category === 'technical_error') { %><span class="pill err">technical_error</span><% } else { %><span class="pill err"><%= err.last_status %></span><% } %>
+          <div class="muted" style="font-size: 12px; margin-top: 4px;">Account: <%= err.account_label %> (<%= err.account_username %>) — last attempt: <%= err.last_fire_at || '—' %></div>
+          <div class="actions">
+            <a href="/recurring/<%= err.id %>"><button class="secondary" type="button">View</button></a>
+            <button class="secondary" onclick="fireNowBtn(<%= err.id %>)">Fire now</button>
+            <button class="secondary" onclick="dismissError(<%= err.id %>)">Dismiss</button>
+            <button class="secondary" onclick="toggleRecurring(<%= err.id %>, false)">Disable</button>
+          </div>
+        </div>
+      <% }); %>
+    <% } %>
     <% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>

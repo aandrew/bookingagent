@@ -1,0 +1,28 @@
+<%- include('partials/header', { title: 'Fire events' }) %>
+<div class="panel">
+  <h2>Fire events</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Recurring</th><th>Account</th><th>Status</th><th>Court</th><th>Latency</th><th>Error</th></tr></thead>
+    <tbody>
+    <% events.forEach(function(e) { %>
+      <tr>
+        <td class="muted"><%= e.fired_at || e.scheduled_at %></td>
+        <td><% if (e.recurring_id) { %><a href="/recurring/<%= e.recurring_id %>">#<%= e.recurring_id %></a><% } %></td>
+        <td><%= e.account_id ? '#' + e.account_id : '' %></td>
+        <td>
+          <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
+          <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
+          <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
+          <% } else if (e.status === 'firing') { %><span class="pill info">firing</span>
+          <% } else { %><span class="pill"><%= e.status %></span><% } %>
+        </td>
+        <td><%= e.court_booked || e.court_attempted || '—' %></td>
+        <td class="muted"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
+        <td class="muted" style="max-width: 300px; overflow:hidden; text-overflow:ellipsis;" title="<%= e.error || '' %>"><%= e.error || '' %></td>
+      </tr>
+    <% }) %>
+    <% if (!events.length) { %><tr><td colspan="7" class="muted">No fire events yet.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+<%- include('partials/footer') %>

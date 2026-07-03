@@ -1,0 +1,88 @@
+<%- include('partials/header', { title: 'Recurring #' + recurring.id }) %>
+<div class="panel">
+  <h2><%= recurring.label %></h2>
+  <p class="muted">Account: <%= account ? account.label + ' (' + account.username + ')' : '#' + recurring.account_id %> — State: <%= account?.state || '—' %></p>
+  <p>Pattern: Court <%= recurring.court_pref %> on <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][recurring.day_of_week] %> at <%= recurring.time %> Sydney, <%= recurring.duration_mins %>m duration</p>
+  <p>Next fire: <span class="countdown" data-fire-at="<%= new Date(recurring.next_fire_at).getTime() %>">…</span> (<%= recurring.next_fire_at %>)</p>
+  <p>First-occurrence action: <span class="pill"><%= recurring.first_occurrence_action || '—' %></span></p>
+  <p>Enabled: <%= recurring.enabled ? 'yes' : 'no' %></p>
+  <p>
+    <button class="secondary" onclick="fireNowBtn(<%= recurring.id %>)">Fire now</button>
+    <button class="secondary" onclick="toggleRecurring(<%= recurring.id %>, <%= !recurring.enabled %>)"><%= recurring.enabled ? 'Disable' : 'Enable' %></button>
+    <button class="secondary" onclick="dismissError(<%= recurring.id %>)">Dismiss current error</button>
+    <button class="danger" onclick="removeRecurring(<%= recurring.id %>)">Delete</button>
+  </p>
+</div>
+
+<% if (recurring.last_status) { %>
+  <div class="panel">
+    <h2>Last result</h2>
+    <p>
+      Status: <span class="pill <%= recurring.last_status === 'booked' ? 'ok' : (recurring.last_error_category === 'no_time_available' ? 'warn' : (recurring.last_error_category === 'technical_error' ? 'err' : '')) %>"><%= recurring.last_status %></span>
+      <% if (recurring.last_error_category) { %> — Category: <span class="pill"><%= recurring.last_error_category %></span><% } %>
+    </p>
+    <p class="muted"><%= recurring.last_msg || '' %></p>
+    <p class="muted">Last fire at: <%= recurring.last_fire_at || '—' %></p>
+  </div>
+<% } %>
+
+<div class="panel">
+  <h2>Fire history (<%= events.length %>)</h2>
+  <table>
+    <thead><tr><th>Scheduled</th><th>Fired</th><th>Drift</th><th>Status</th><th>Court</th><th>Latency</th><th>Response</th><th>Error</th></tr></thead>
+    <tbody>
+    <% events.forEach(function(e) { %>
+      <% var drift = ''; if (e.scheduled_at && e.fired_at) { var d = new Date(e.fired_at) - new Date(e.scheduled_at); drift = (d >= 0 ? '+' : '') + d + 'ms'; } %>
+      <tr>
+        <td class="muted"><%= e.scheduled_at %></td>
+        <td class="muted"><%= e.fired_at || '—' %></td>
+        <td class="muted"><%= drift %></td>
+        <td>
+          <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
+          <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
+          <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
+          <% } else { %><span class="pill"><%= e.status %></span><% } %>
+        </td>
+        <td><%= e.court_booked || e.court_attempted || '—' %></td>
+        <td class="muted"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
+        <td class="muted"><%= e.response_status || '' %></td>
+        <td class="muted" style="max-width: 240px; overflow:hidden; text-overflow:ellipsis;" title="<%= e.error || '' %>"><%= e.error || '' %></td>
+      </tr>
+    <% }) %>
+    <% if (!events.length) { %><tr><td colspan="8" class="muted">No fires yet.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Bookings from this recurring (<%= bookings.length %>)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Date</th><th>Time</th><th>Court</th><th>Status</th><th>External ID</th></tr></thead>
+    <tbody>
+    <% bookings.forEach(function(b) { %>
+      <tr>
+        <td><%= b.id %></td>
+        <td><%= b.date %></td>
+        <td><%= b.start_time %>–<%= b.end_time %></td>
+        <td><%= b.court %></td>
+        <td>
+          <% if (b.status === 'confirmed') { %><span class="pill ok">confirmed</span>
+          <% } else if (b.status === 'cancelled') { %><span class="pill warn">cancelled</span>
+          <% } else { %><span class="pill err"><%= b.status %></span><% } %>
+        </td>
+        <td class="muted"><%= b.external_id || '' %></td>
+      </tr>
+    <% }) %>
+    <% if (!bookings.length) { %><tr><td colspan="6" class="muted">No bookings yet.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  async function removeRecurring(id) {
+    if (!confirm('Delete recurring #' + id + '?')) return;
+    try { await jsonReq('/api/recurring/' + id, { method: 'DELETE' }); location.href = '/recurring'; }
+    catch (e) { alert(e.message); }
+  }
+</script>
+<%- include('partials/footer') %>
