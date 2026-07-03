@@ -4,6 +4,12 @@ Multi-account tennis-court booking agent for [kooroora.asn.au](https://kooroora.
 
 **Version 3** — UI simplifications (auto-label, single toggle, pagination, Sydney time), global lead minutes, and a durable data tier with hot backups + restore scripts.
 
+## Docs
+
+- **`README.md`** (this file) — user-facing: how to run it, what each screen does, deploy guide links
+- **[`ARCHITECTURE.md`](ARCHITECTURE.md)** — engineering reference: module map, data model, scheduler internals, fire path, state machine, failure modes, where to start when picking it up
+- **[`DEPLOY.md`](DEPLOY.md)** — operator: data tier, backup procedures, VPS setup, deploy/rollback
+
 ## What it does
 
 Kooroora releases booking slots **exactly 7 days before the slot's start time, to the hour**. The agent holds an active session, primes a pre-built POST request minutes before the release, then fires at the exact millisecond to win the race against other bots. It chains successful fires to the following week automatically.
