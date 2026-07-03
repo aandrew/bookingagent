@@ -6,8 +6,16 @@ services:
     env_file: .env
     environment:
       - NODE_ENV=production
+      - DATA_DIR=/app/data
+      - BACKUP_DIR=/app/backups
+    # The DB lives on the host filesystem (bind mount). This is the
+    # "simple but durable" tier: survives container rebuilds, image
+    # upgrades, and `docker compose down` (unlike named volumes, it's
+    # NOT removed by `docker compose down -v`). Backups go to a named
+    # volume so they survive even if the host's backups dir is lost.
     volumes:
       - ./data:/app/data
+      - bookingagent_backups:/app/backups
     healthcheck:
       test: ["CMD","wget","-qO-","http://127.0.0.1:3000/healthz"]
       interval: 30s
@@ -34,6 +42,7 @@ services:
     networks: [internal]
 
 volumes:
+  bookingagent_backups:
   caddy_data:
   caddy_config:
 

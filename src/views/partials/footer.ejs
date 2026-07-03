@@ -41,6 +41,12 @@
       });
       setTimeout(tickCountdowns, 1000);
     })();
+
+    // Auto-dismiss .flash.auto-dismiss elements after 4 seconds (CSS handles fade)
+    (function autoDismissFlashes() {
+      const els = document.querySelectorAll('.flash.auto-dismiss');
+      els.forEach(el => setTimeout(() => el.remove(), 4100));
+    })();
   </script>
 </body>
 </html>

@@ -7,6 +7,7 @@ const warmup = require('./warmup');
 const fire = require('./fire');
 const recurring = require('./recurring');
 const log = require('../logger');
+const config = require('../config');
 const { KoorooClient } = require('../kooroo/client');
 const { timeToSlot, slotToTime } = require('../kooroo/client');
 
@@ -109,8 +110,11 @@ function schedule(recurringId) {
   const now = Date.now();
   const delta = nextUtc - now;
   const isImmediate = delta <= 1000;
-  const leadMs = (rec.lead_minutes || 10) * 60_000;
-  log.info('scheduler.arm', { recurring: recurringId, nextUtc, deltaMs: delta, isImmediate });
+  // v3: lead minutes is global (LEAD_MINUTES_BEFORE_FIRE). The per-recurring
+  // lead_minutes field is ignored — the form no longer exposes it and we
+  // always use the configured default.
+  const leadMs = config.defaultLeadMinutesBeforeFire * 60_000;
+  log.info('scheduler.arm', { recurring: recurringId, nextUtc, deltaMs: delta, isImmediate, leadMinutes: config.defaultLeadMinutesBeforeFire });
   if (isImmediate) {
     const fireTimer = setTimeout(() => {
       executeImmediateBooking(rec).catch(e => log.error('scheduler.immediate.error', { recurring: recurringId, error: e.message }));

@@ -9,6 +9,7 @@ const scheduler = require('./scheduler');
 
 let probeTask;
 let auditTask;
+let backupTask;
 
 function start() {
   // Sub-second scheduler for recurring bookings
@@ -37,14 +38,32 @@ function start() {
     });
     log.info('cron.audit.started', {});
   }
+  // v3: daily backup touch (writes a marker so the dashboard can show last-backup age)
+  if (!backupTask) {
+    backupTask = cron.schedule(config.backups.dailyCron, () => {
+      try {
+        const fs = require('fs');
+        fs.mkdirSync(config.backups.dir, { recursive: true });
+        const marker = {
+          ran_at: new Date().toISOString(),
+          host: require('os').hostname(),
+        };
+        fs.writeFileSync(`${config.backups.dir}/.last-run`, JSON.stringify(marker, null, 2));
+        log.info('cron.backup.marker', marker);
+      } catch (e) {
+        log.error('cron.backup.error', { error: e.message });
+      }
+    });
+    log.info('cron.backup.started', { expr: config.backups.dailyCron });
+  }
 }
 
 function stop() {
   scheduler.stop();
-  for (const t of [probeTask, auditTask]) {
+  for (const t of [probeTask, auditTask, backupTask]) {
     try { t?.stop?.(); } catch {}
   }
-  probeTask = auditTask = undefined;
+  probeTask = auditTask = backupTask = undefined;
   pool.shutdown();
 }
 

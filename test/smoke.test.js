@@ -322,6 +322,111 @@ if (process.env.KOOROO_LIVE_TEST === '1') {
   }
 }
 
+// ---- v3 tests ----
+const fmt = require('../src/lib/format');
+
+test('v3: format.formatTime12h', () => {
+  assert.equal(fmt.formatTime12h('19:00'), '7pm');
+  assert.equal(fmt.formatTime12h('07:30'), '7:30am');
+  assert.equal(fmt.formatTime12h('00:00'), '12am');
+  assert.equal(fmt.formatTime12h('12:00'), '12pm');
+  assert.equal(fmt.formatTime12h('09:15'), '9:15am');
+  assert.equal(fmt.formatTime12h('23:45'), '11:45pm');
+  assert.equal(fmt.formatTime12h('bad'), 'bad');
+});
+
+test('v3: format.truncate', () => {
+  assert.equal(fmt.truncate('Andrew Stevens', 7), 'Andrew');
+  assert.equal(fmt.truncate('Robert', 7), 'Robert');
+  assert.equal(fmt.truncate('Hi', 7), 'Hi');
+  assert.equal(fmt.truncate('', 7), '');
+  assert.equal(fmt.truncate('AndrewStevens', 10), 'AndrewStev');
+  // trailing space gets trimmed
+  assert.equal(fmt.truncate('Andrew  ', 7), 'Andrew');
+});
+
+test('v3: format.buildRecurringLabel', () => {
+  assert.equal(fmt.buildRecurringLabel({ day_of_week: 3, time: '19:00', court_pref: '4' }), 'Wed 7pm Crt 4');
+  assert.equal(fmt.buildRecurringLabel({ day_of_week: 0, time: '08:00', court_pref: '6' }), 'Sun 8am Crt 6');
+  assert.equal(fmt.buildRecurringLabel({ day_of_week: 6, time: '13:30', court_pref: '5' }), 'Sat 1:30pm Crt 5');
+});
+
+test('v3: format.computeFallbackOrder', () => {
+  assert.deepEqual(fmt.computeFallbackOrder('4', true), ['4', '5', '6']);
+  assert.deepEqual(fmt.computeFallbackOrder('5', true), ['5', '4', '6']);  // 5, then ascending 4,6
+  assert.deepEqual(fmt.computeFallbackOrder('6', true), ['6', '4', '5']);
+  assert.deepEqual(fmt.computeFallbackOrder('5', false), ['5']);
+  assert.deepEqual(fmt.computeFallbackOrder('4', false), ['4']);
+});
+
+test('v3: format.formatSydneyDateTime uses AEST (winter) and AEDT (summer)', () => {
+  // July 8 2026 19:00 Sydney = 09:00 UTC (AEST)
+  const jul = fmt.formatSydneyDateTime('2026-07-08T09:00:00Z');
+  assert.ok(jul.includes('AEST'), `expected AEST in: ${jul}`);
+  assert.ok(jul.includes('7:00 PM'), `expected 7:00 PM in: ${jul}`);
+  // Dec 15 2026 19:00 Sydney = 08:00 UTC (AEDT)
+  const dec = fmt.formatSydneyDateTime('2026-12-15T08:00:00Z');
+  assert.ok(dec.includes('AEDT'), `expected AEDT in: ${dec}`);
+  assert.ok(dec.includes('7:00 PM'), `expected 7:00 PM in: ${dec}`);
+});
+
+test('v3: recurring.add auto-generates label and uses fallback_enabled', () => {
+  // Clean up any leftover recurring
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+
+  const a = repo.accounts.create({ label: 'v3test', username: 'v3user', password: 'p' });
+  const r = recurring.add({
+    account_id: a.id,
+    day_of_week: 3, time: '19:00', court_pref: '4',
+    duration_mins: 60, fallback_enabled: true,
+  });
+  assert.equal(r.label, 'Wed 7pm Crt 4', `expected "Wed 7pm Crt 4", got "${r.label}"`);
+  assert.deepEqual(r.courts, ['4', '5', '6']);
+  assert.equal(r.first_occurrence_action, 'book_now');
+  assert.ok(r.next_fire_at);
+
+  // fallback_enabled: false
+  const r2 = recurring.add({
+    account_id: a.id,
+    day_of_week: 6, time: '08:00', court_pref: '6',
+    duration_mins: 60, fallback_enabled: false,
+  });
+  assert.equal(r2.label, 'Sat 8am Crt 6');
+  assert.deepEqual(r2.courts, ['6']);
+
+  // fallback_enabled with court 5 → order is 5, 4, 6
+  const r3 = recurring.add({
+    account_id: a.id,
+    day_of_week: 2, time: '18:30', court_pref: '5',
+    duration_mins: 60, fallback_enabled: true,
+  });
+  assert.equal(r3.label, 'Tue 6:30pm Crt 5');
+  assert.deepEqual(r3.courts, ['5', '4', '6']);
+
+  // Custom label still wins if provided (backward compat with the API)
+  const r4 = recurring.add({
+    account_id: a.id,
+    day_of_week: 1, time: '20:00', court_pref: '4',
+    duration_mins: 60, label: 'My Custom Label', fallback_enabled: true,
+  });
+  assert.equal(r4.label, 'My Custom Label');
+
+  // legacy `courts` array still works
+  const r5 = recurring.add({
+    account_id: a.id,
+    day_of_week: 4, time: '19:00', court_pref: '4',
+    duration_mins: 60, courts: ['4', '5'],
+  });
+  assert.deepEqual(r5.courts, ['4', '5']);
+
+  repo.accounts.remove(a.id);
+});
+
+test('v3: config has defaultLeadMinutesBeforeFire default of 5', () => {
+  const config = require('../src/config');
+  assert.equal(config.defaultLeadMinutesBeforeFire, 5);
+});
+
 test('teardown', () => {
   db.close();
   fs.rmSync(tmpDir, { recursive: true, force: true });

@@ -44,6 +44,12 @@ const config = {
   pollCron: process.env.POLL_CRON || '*/2 * * * *',
   sessionProbeCron: process.env.SESSION_PROBE_CRON || '*/10 * * * *',
   defaultLeadDays: intEnv('DEFAULT_LEAD_DAYS', 7),
+  defaultLeadMinutesBeforeFire: intEnv('LEAD_MINUTES_BEFORE_FIRE', 5),
+  backups: {
+    retentionDays: intEnv('BACKUP_RETENTION_DAYS', 30),
+    dailyCron: process.env.BACKUP_CRON || '30 2 * * *',
+    dir: process.env.BACKUP_DIR || path.join(process.env.DATA_DIR || path.join(__dirname, '..', 'data'), '..', 'backups'),
+  },
   audit: {
     fullBodies: boolEnv('AUDIT_FULL_BODIES', true),
     retentionDays: intEnv('AUDIT_RETENTION_DAYS', 30),

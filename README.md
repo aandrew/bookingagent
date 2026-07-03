@@ -2,22 +2,29 @@
 
 Multi-account tennis-court booking agent for [kooroora.asn.au](https://kooroora.asn.au) with an admin dashboard.
 
-**Version 2.1** — adds sub-second time-critical recurring booking, first-occurrence detection, error categorisation, and a manual-dismiss banner.
+**Version 3** — UI simplifications (auto-label, single toggle, pagination, Sydney time), global lead minutes, and a durable data tier with hot backups + restore scripts.
 
 ## What it does
 
 Kooroora releases booking slots **exactly 7 days before the slot's start time, to the hour**. The agent holds an active session, primes a pre-built POST request minutes before the release, then fires at the exact millisecond to win the race against other bots. It chains successful fires to the following week automatically.
 
-**v2.1 highlights**
-- **Recurring bookings** (e.g. "Wed 7pm, Court 5, every week")
-- **First-occurrence detection** — if the first slot falls inside the 7-day window, it's booked immediately; otherwise the system waits for the 7-day-out release moment
-- **Per-account state machine** (`waiting → tested_ok → token_ready → primed → firing → booked/failed`) with a coloured pill on the dashboard
-- **Two error categories**:
-  - `no_time_available` — the server reports the slot is already taken
-  - `technical_error` — network, auth, 4xx/5xx, parse failure
-- **Banner at the top of every page** for unacknowledged errors (manual dismiss)
-- **Fire history** with scheduled-vs-actual drift, latency, and the full request/response excerpts
-- **Court restriction** — only Courts 4, 5, 6 (C-numbers) can be selected
+**v3 highlights**
+- **Auto-generated labels** for recurring bookings (`Wed 7pm Crt 4` etc.) — no more typing labels
+- **Single "fall back to other courts" toggle** — backend automatically iterates preferred first, then ascending
+- **Pagination** on Upcoming bookings (6/page, max 5 pages)
+- **Username truncated to 7 chars** in tables (e.g. "Andrew" for "Andrew Stevens")
+- **Human-readable Sydney time** in tables (`3 Jul 7:00 PM AEST` / `15 Dec 7:00 PM AEDT`)
+- **Global lead-minutes** — removed from the per-recurring form; configurable via `LEAD_MINUTES_BEFORE_FIRE`
+- **Data tier** — SQLite on a bind mount (survives upgrades, `down -v`) + hot backups daily to a named volume + `tools/backup.sh`, `tools/restore.sh`, `tools/deploy.sh`, `tools/db-stats.sh`
+
+**v2.1 highlights** (still in place)
+- Recurring bookings (e.g. "Wed 7pm, Court 5, every week")
+- First-occurrence detection — first slot always inside 7d window, so always book_now
+- Per-account state machine (`waiting → tested_ok → token_ready → primed → firing → booked/failed`)
+- Two error categories: `no_time_available` vs `technical_error`
+- Manual-dismiss banner for unacknowledged errors
+- Booking history with scheduled-vs-actual drift, latency, response excerpts
+- Court restriction: only Courts 4, 5, 6 (C-numbers) can be selected
 
 ## How it works
 
@@ -54,6 +61,15 @@ npm run spike
 node tools/import-session.js --label "Andrew" --probe
 npm start
 ```
+
+## Data tier
+
+SQLite, kept simple and durable:
+- **Active DB**: `data/bookingagent.sqlite` (bind mount → container `/app/data`). Survives container rebuilds, image upgrades, and `docker compose down`. Not removed by `docker compose down -v`.
+- **Backups**: a separate named Docker volume `bookingagent_backups` (mapped to `/app/backups` in the container). Daily at 02:30 UTC, 30-day retention, SHA256 + row-count sidecars. `tools/backup.sh` does a hot backup via SQLite's `.backup()` API (no downtime).
+- **Restore**: `tools/restore.sh` (default = latest, or pass a specific filename). Verifies SHA256 first.
+- **Pre-deploy snapshot**: `tools/deploy.sh` runs `tools/backup.sh --label=pre-deploy` before rebuilding, so you can always roll back.
+- **Stats**: `tools/db-stats.sh` for row counts, DB size, and backup state.
 
 ## Adding a recurring booking
 
@@ -103,11 +119,16 @@ npm start
 
 ## Deploy (VPS)
 ```bash
+# One-shot
 docker compose up -d --build
+
+# Subsequent updates (auto-snapshots DB first, then rolls forward)
+tools/deploy.sh
+
+# Roll back
+tools/restore.sh           # latest backup
 ```
-- App: `:3000` (no public port — fronted by Caddy)
-- Caddy: `:80/:443` with auto-TLS via Cloudflare DNS challenge
-- Update `Caddyfile` to use your real domain (`boomercheugys.com` is the placeholder) and set `CF_API_TOKEN` in `.env`.
+See `DEPLOY.md` for the full data-tier story.
 
 ## Project layout
 ```
@@ -142,6 +163,10 @@ tools/
   probe-api.js              read schedule + book/cancel smoke test
   cancel-my-bookings.js     bulk cancel your bookings on a date
   probe-error-responses.js  v2.1 — capture the server's error messages for the categoriser
+  backup.sh                 v3 — hot backup (SQLite .backup API), SHA256 + counts + prune
+  restore.sh                v3 — rehydrate from a backup, verifies SHA256 first
+  deploy.sh                 v3 — snapshot → build → restart (use for upgrades)
+  db-stats.sh               v3 — row counts + DB size + last backup age
 test/smoke.test.js          unit + live API tests
 ```
 

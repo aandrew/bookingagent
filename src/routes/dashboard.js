@@ -8,6 +8,7 @@ const monitor = require('../agent/monitor');
 const pool = require('../agent/pool');
 const recurring = require('../agent/recurring');
 const config = require('../config');
+const format = require('../lib/format');
 
 // Helper: attach activeErrors to all renders
 function withLocals(extra) {
@@ -21,7 +22,7 @@ router.get('/', requireAdmin, (req, res) => {
   const recentAudit = repo.audit.list({ limit: 20 });
   const recurringRows = recurring.list();
   const fireEvents = repo.fireEvents.list({ limit: 5 });
-  res.render('overview', withLocals({ accounts, watches, bookings, recentAudit, recurringRows, fireEvents, config }));
+  res.render('overview', withLocals({ accounts, watches, bookings, recentAudit, recurringRows, fireEvents, config, format, query: req.query }));
 });
 
 router.get('/accounts', requireAdmin, (req, res) => {
@@ -45,6 +46,13 @@ router.get('/bookings', requireAdmin, (req, res) => {
 router.get('/recurring', requireAdmin, (req, res) => {
   const recurringRows = recurring.list();
   const accounts = repo.accounts.list();
+  // Build a username lookup for the view
+  const userById = Object.fromEntries(accounts.map(a => [a.id, a.username]));
+  for (const r of recurringRows) r.account_username = userById[r.account_id] || null;
+  // v3: handle ?added=N&label=X flash
+  if (req.query.added && req.query.label) {
+    req.session.flash = { type: 'ok', message: `Added ${req.query.label} (recurring #${req.query.added})` };
+  }
   res.render('recurring', withLocals({ recurringRows, accounts }));
 });
 
@@ -54,7 +62,7 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
   const events = repo.fireEvents.list({ recurringId: r.id, limit: 50 });
   const bookings = repo.bookings.listForRecurring(r.id, 20);
   const account = repo.accounts.get(r.account_id);
-  res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account }));
+  res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account, format, query: req.query }));
 });
 
 router.get('/booking-log', requireAdmin, (req, res) => {

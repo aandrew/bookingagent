@@ -9,11 +9,19 @@ const log = require('../logger');
 const config = require('../config');
 const endpoints = require('../kooroo/endpoints.json');
 const { KoorooClient } = require('../kooroo/client');
+const fmt = require('../lib/format');
 
 // Allowed courts (C-numbers the user picks; mapped to API court_ids).
 const ALLOWED_COURTS = ['4', '5', '6']; // C4, C5, C6
 const COURT_TO_API = { '4': '5', '5': '6', '6': '7' };
 const API_TO_COURT = { '5': '4', '6': '5', '7': '6' };
+
+// Build the fallback order for a given preferred court and a toggle.
+// When fallback is on, the order is: preferred, then ascending 4 → 5 → 6 (skipping
+// the preferred). When off, just the preferred.
+function computeFallbackOrder(courtPref, fallbackEnabled) {
+  return fmt.computeFallbackOrder(courtPref, !!fallbackEnabled);
+}
 
 function validate(rec) {
   if (!ALLOWED_COURTS.includes(rec.court_pref)) {
@@ -29,11 +37,29 @@ function validate(rec) {
   }
 }
 
+// v3 normalize:
+//   - If `fallback_enabled` is provided, use it to compute the courts array
+//   - Else if `courts` is provided (legacy form), keep it but ensure preferred is first
+//   - Else default to [preferred] (no fallback)
 function normalize(rec) {
-  const courts = rec.courts && rec.courts.length ? rec.courts : [rec.court_pref];
-  // ensure court_pref is first in the fallback list
-  const unique = [rec.court_pref, ...courts.filter(c => c !== rec.court_pref)];
-  return { ...rec, courts: unique };
+  const out = { ...rec };
+  if (typeof rec.fallback_enabled === 'boolean') {
+    out.courts = computeFallbackOrder(rec.court_pref, rec.fallback_enabled);
+  } else if (rec.courts && rec.courts.length) {
+    const unique = [rec.court_pref, ...rec.courts.filter(c => c !== rec.court_pref)];
+    out.courts = unique;
+  } else {
+    out.courts = [rec.court_pref];
+  }
+  // Auto-generate label if not provided
+  if (!out.label) {
+    out.label = fmt.buildRecurringLabel({
+      day_of_week: out.day_of_week,
+      time: out.time,
+      court_pref: out.court_pref,
+    });
+  }
+  return out;
 }
 
 function present(r) {
@@ -54,18 +80,22 @@ function add(input) {
   // Fire immediately; the chain will set next_fire_at to first_occurrence + 7d after.
   const nextFireAt = new Date(firstOccurrenceUtc).toISOString();
   const created = repo.recurring.create({ ...rec, first_occurrence_action: action, next_fire_at: nextFireAt });
-  log.info('recurring.add', { id: created.id, action, firstOccurrenceUtc });
+  log.info('recurring.add', { id: created.id, action, firstOccurrenceUtc, label: created.label, fallback_enabled: !!rec.fallback_enabled });
   return present(created);
 }
 
 function update(id, fields) {
   const cur = repo.recurring.get(id);
   if (!cur) throw new Error('not found');
-  const merged = normalize({ ...cur, ...fields, courts: fields.courts || JSON.parse(cur.courts || '[]') });
+  const merged = normalize({
+    ...cur,
+    ...fields,
+    courts: fields.courts || (typeof fields.fallback_enabled === 'boolean' ? undefined : JSON.parse(cur.courts || '[]')),
+  });
   validate(merged);
   const updated = repo.recurring.update(id, merged);
-  if (fields.day_of_week !== undefined || fields.time !== undefined || fields.court_pref !== undefined || fields.courts !== undefined) {
-    // re-anchor to the next occurrence
+  // Re-anchor to the next occurrence if the schedule changed OR the courts changed
+  if (fields.day_of_week !== undefined || fields.time !== undefined || fields.court_pref !== undefined || fields.courts !== undefined || fields.fallback_enabled !== undefined) {
     const firstOccurrenceUtc = time.nextWeekdayAt(updated.day_of_week, updated.time, { after: Date.now() });
     repo.recurring.update(id, { first_occurrence_action: 'book_now', next_fire_at: new Date(firstOccurrenceUtc).toISOString() });
   }
@@ -136,7 +166,7 @@ async function bookNow(recurringId, opts = {}) {
   return { category: result.category, result };
 }
 
-module.exports = { add, update, remove, list, get, present, validate, normalize, chainToNextWeek, bookNow, ALLOWED_COURTS, COURT_TO_API, API_TO_COURT };
+module.exports = { add, update, remove, list, get, present, validate, normalize, chainToNextWeek, bookNow, computeFallbackOrder, ALLOWED_COURTS, COURT_TO_API, API_TO_COURT };
 // backward-compat alias
 const _origFireNow = module.exports.bookNow;
 if (!module.exports.fireNow) module.exports.fireNow = _origFireNow;
