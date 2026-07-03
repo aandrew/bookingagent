@@ -110,8 +110,8 @@ function chainToNextWeek(recurringId) {
   return { nextFireMs };
 }
 
-// One-off manual fire (used by the dashboard "Fire now" button).
-async function fireNow(recurringId, opts = {}) {
+// One-off manual booking (used by the dashboard "Book now" button).
+async function bookNow(recurringId, opts = {}) {
   const r = repo.recurring.get(recurringId);
   if (!r) throw new Error('not found');
   const courts = JSON.parse(r.courts || '[]');
@@ -136,4 +136,7 @@ async function fireNow(recurringId, opts = {}) {
   return { category: result.category, result };
 }
 
-module.exports = { add, update, remove, list, get, present, validate, normalize, chainToNextWeek, fireNow, ALLOWED_COURTS, COURT_TO_API, API_TO_COURT };
+module.exports = { add, update, remove, list, get, present, validate, normalize, chainToNextWeek, bookNow, ALLOWED_COURTS, COURT_TO_API, API_TO_COURT };
+// backward-compat alias
+const _origFireNow = module.exports.bookNow;
+if (!module.exports.fireNow) module.exports.fireNow = _origFireNow;

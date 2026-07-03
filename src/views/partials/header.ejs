@@ -59,7 +59,7 @@
 </head>
 <body>
   <header class="top">
-    <h1>🎾 Kooroo Agent</h1>
+    <h1>🎾 Kooroora Booking Agent</h1>
     <% if (user) { %>
       <nav>
         <a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">Overview</a>
@@ -67,7 +67,7 @@
         <a href="/accounts" class="<%= currentPath.startsWith('/accounts') ? 'active' : '' %>">Accounts</a>
         <a href="/watches" class="<%= currentPath.startsWith('/watches') ? 'active' : '' %>">Watches</a>
         <a href="/bookings" class="<%= currentPath.startsWith('/bookings') ? 'active' : '' %>">Bookings</a>
-        <a href="/fire-events" class="<%= currentPath.startsWith('/fire-events') ? 'active' : '' %>">Fires</a>
+        <a href="/booking-log" class="<%= currentPath.startsWith('/booking-log') || currentPath.startsWith('/fire-events') ? 'active' : '' %>">Booking log</a>
         <a href="/audit" class="<%= currentPath.startsWith('/audit') ? 'active' : '' %>">Audit</a>
         <a href="/settings" class="<%= currentPath.startsWith('/settings') ? 'active' : '' %>">Settings</a>
       </nav>
@@ -86,7 +86,7 @@
           <div class="muted" style="font-size: 12px; margin-top: 4px;">Account: <%= err.account_label %> (<%= err.account_username %>) — last attempt: <%= err.last_fire_at || '—' %></div>
           <div class="actions">
             <a href="/recurring/<%= err.id %>"><button class="secondary" type="button">View</button></a>
-            <button class="secondary" onclick="fireNowBtn(<%= err.id %>)">Fire now</button>
+            <button class="secondary" onclick="bookNowBtn(<%= err.id %>)">Book now</button>
             <button class="secondary" onclick="dismissError(<%= err.id %>)">Dismiss</button>
             <button class="secondary" onclick="toggleRecurring(<%= err.id %>, false)">Disable</button>
           </div>

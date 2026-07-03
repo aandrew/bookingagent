@@ -3,11 +3,11 @@
   <h2><%= recurring.label %></h2>
   <p class="muted">Account: <%= account ? account.label + ' (' + account.username + ')' : '#' + recurring.account_id %> — State: <%= account?.state || '—' %></p>
   <p>Pattern: Court <%= recurring.court_pref %> on <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][recurring.day_of_week] %> at <%= recurring.time %> Sydney, <%= recurring.duration_mins %>m duration</p>
-  <p>Next fire: <span class="countdown" data-fire-at="<%= new Date(recurring.next_fire_at).getTime() %>">…</span> (<%= recurring.next_fire_at %>)</p>
-  <p>First-occurrence action: <span class="pill"><%= recurring.first_occurrence_action || '—' %></span></p>
+  <p>Next attempt: <span class="countdown" data-fire-at="<%= new Date(recurring.next_fire_at).getTime() %>">…</span> (<%= recurring.next_fire_at %>)</p>
+  <p>First-occurrence action: <span class="pill"><%= recurring.first_occurrence_action === 'book_now' ? 'book now' : (recurring.first_occurrence_action || '—') %></span></p>
   <p>Enabled: <%= recurring.enabled ? 'yes' : 'no' %></p>
   <p>
-    <button class="secondary" onclick="fireNowBtn(<%= recurring.id %>)">Fire now</button>
+    <button class="secondary" onclick="bookNowBtn(<%= recurring.id %>)">Book now</button>
     <button class="secondary" onclick="toggleRecurring(<%= recurring.id %>, <%= !recurring.enabled %>)"><%= recurring.enabled ? 'Disable' : 'Enable' %></button>
     <button class="secondary" onclick="dismissError(<%= recurring.id %>)">Dismiss current error</button>
     <button class="danger" onclick="removeRecurring(<%= recurring.id %>)">Delete</button>
@@ -22,14 +22,14 @@
       <% if (recurring.last_error_category) { %> — Category: <span class="pill"><%= recurring.last_error_category %></span><% } %>
     </p>
     <p class="muted"><%= recurring.last_msg || '' %></p>
-    <p class="muted">Last fire at: <%= recurring.last_fire_at || '—' %></p>
+    <p class="muted">Last attempt at: <%= recurring.last_fire_at || '—' %></p>
   </div>
 <% } %>
 
 <div class="panel">
-  <h2>Fire history (<%= events.length %>)</h2>
+  <h2>Booking history (<%= events.length %>)</h2>
   <table>
-    <thead><tr><th>Scheduled</th><th>Fired</th><th>Drift</th><th>Status</th><th>Court</th><th>Latency</th><th>Response</th><th>Error</th></tr></thead>
+    <thead><tr><th>Scheduled</th><th>Attempted</th><th>Drift</th><th>Status</th><th>Court</th><th>Latency</th><th>Response</th><th>Error</th></tr></thead>
     <tbody>
     <% events.forEach(function(e) { %>
       <% var drift = ''; if (e.scheduled_at && e.fired_at) { var d = new Date(e.fired_at) - new Date(e.scheduled_at); drift = (d >= 0 ? '+' : '') + d + 'ms'; } %>
@@ -49,7 +49,7 @@
         <td class="muted" style="max-width: 240px; overflow:hidden; text-overflow:ellipsis;" title="<%= e.error || '' %>"><%= e.error || '' %></td>
       </tr>
     <% }) %>
-    <% if (!events.length) { %><tr><td colspan="8" class="muted">No fires yet.</td></tr><% } %>
+    <% if (!events.length) { %><tr><td colspan="8" class="muted">No booking attempts yet.</td></tr><% } %>
     </tbody>
   </table>
 </div>

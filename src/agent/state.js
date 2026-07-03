@@ -6,12 +6,12 @@ const log = require('../logger');
 const STATES = {
   WAITING:        'waiting',         // credentials added, not yet tested
   TESTED_OK:      'tested_ok',       // logged in, params bootstrapped
-  TOKEN_READY:    'token_ready',     // fresh session, ready to fire
+  TOKEN_READY:    'token_ready',     // fresh session, ready to attempt
   PRIMED:         'primed',          // token fresh + prebuilt request ready
-  FIRST_IMMEDIATE:'first_immediate', // first-occurrence is inside 7d window, firing now
-  FIRING:         'firing',          // POST in flight
-  BOOKED:         'booked',          // last fire was successful
-  FAILED:         'failed',          // last fire failed
+  FIRST_IMMEDIATE:'first_immediate', // first-occurrence is inside 7d window, attempting now
+  ATTEMPTING:     'attempting',      // POST in flight
+  BOOKED:         'booked',          // last attempt was successful
+  FAILED:         'failed',          // last attempt failed
   SESSION_EXPIRED:'session_expired', // probe failed, needs relogin
   LOGIN_REQUIRED: 'login_required',  // couldn't relogin during warmup
   ERROR:          'error',           // unrecoverable error
@@ -20,10 +20,10 @@ const STATES = {
 const TRANSITIONS = {
   waiting: ['tested_ok', 'session_expired', 'error'],
   tested_ok: ['token_ready', 'session_expired', 'error'],
-  token_ready: ['primed', 'firing', 'first_immediate', 'session_expired', 'error'],
-  primed: ['firing', 'session_expired', 'error'],
-  first_immediate: ['firing', 'booked', 'failed', 'error'],
-  firing: ['booked', 'failed', 'session_expired', 'error', 'login_required'],
+  token_ready: ['primed', 'attempting', 'first_immediate', 'session_expired', 'error'],
+  primed: ['attempting', 'session_expired', 'error'],
+  first_immediate: ['attempting', 'booked', 'failed', 'error'],
+  attempting: ['booked', 'failed', 'session_expired', 'error', 'login_required'],
   booked: ['token_ready', 'primed', 'first_immediate'],
   failed: ['token_ready', 'primed', 'first_immediate'],
   session_expired: ['tested_ok', 'token_ready', 'login_required', 'error'],

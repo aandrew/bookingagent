@@ -101,7 +101,7 @@ async function fireCourts(client, { date, from, to, courts, dateStr, timeStr, at
 
 // Scheduled fire at the exact targetMs. Tries courts in order, fast.
 async function fireScheduled({ recurring, targetMs, client, primed }) {
-  state.transition(recurring.account_id, state.STATES.FIRING, `fire at ${new Date(targetMs).toISOString()}`);
+  state.transition(recurring.account_id, state.STATES.ATTEMPTING, `book at ${new Date(targetMs).toISOString()}`);
   const { date, from, to, courtId } = primed;
   const result = await fireCourts(client, {
     date, from, to,
@@ -112,7 +112,7 @@ async function fireScheduled({ recurring, targetMs, client, primed }) {
       repo.fireEvents.create({
         recurring_id: recurring.id, account_id: recurring.account_id,
         scheduled_at: new Date(targetMs).toISOString(),
-        status: 'firing', attempt, court_attempted: cid,
+        status: 'attempting', attempt, court_attempted: cid,
         date, time: slotToTime(from),
       });
     },
@@ -170,13 +170,13 @@ async function fireImmediate({ recurring, client, primed, onProgress }) {
   const attempts = [];
   let booked = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    state.transition(recurring.account_id, state.STATES.FIRING, `immediate attempt ${attempt}/3`);
-    if (onProgress) onProgress({ attempt, phase: 'firing' });
+    state.transition(recurring.account_id, state.STATES.ATTEMPTING, `immediate attempt ${attempt}/3`);
+    if (onProgress) onProgress({ attempt, phase: 'attempting' });
     const result = await fireCourts(client, { date, from, to, courts, attempt, onAttempt: ({ courtId }) => {
       repo.fireEvents.create({
         recurring_id: recurring.id, account_id: recurring.account_id,
         scheduled_at: new Date().toISOString(),
-        status: 'firing', attempt, court_attempted: courtId,
+        status: 'attempting', attempt, court_attempted: courtId,
         date, time: slotToTime(from),
       });
     }});

@@ -189,9 +189,19 @@ router.delete('/recurring/:id', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/recurring/:id/book-now', requireAdmin, async (req, res) => {
+  try {
+    const r = await recurring.bookNow(parseInt(req.params.id, 10));
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Backward-compat alias
 router.post('/recurring/:id/fire-now', requireAdmin, async (req, res) => {
   try {
-    const r = await recurring.fireNow(parseInt(req.params.id, 10));
+    const r = await recurring.bookNow(parseInt(req.params.id, 10));
     res.json(r);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -205,10 +215,25 @@ router.post('/recurring/:id/dismiss-error', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+router.get('/recurring/:id/attempts', requireAdmin, (req, res) => {
+  res.json(repo.fireEvents.list({ recurringId: parseInt(req.params.id, 10), limit: 100 }));
+});
+
+// Backward-compat alias
 router.get('/recurring/:id/fire-events', requireAdmin, (req, res) => {
   res.json(repo.fireEvents.list({ recurringId: parseInt(req.params.id, 10), limit: 100 }));
 });
 
+router.get('/booking-log', requireAdmin, (req, res) => {
+  res.json(repo.fireEvents.list({
+    limit: parseInt(req.query.limit || '100', 10),
+    recurringId: req.query.recurring_id ? parseInt(req.query.recurring_id, 10) : null,
+    accountId: req.query.account_id ? parseInt(req.query.account_id, 10) : null,
+    status: req.query.status || null,
+  }));
+});
+
+// Backward-compat alias
 router.get('/fire-events', requireAdmin, (req, res) => {
   res.json(repo.fireEvents.list({
     limit: parseInt(req.query.limit || '100', 10),

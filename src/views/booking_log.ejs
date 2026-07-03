@@ -1,6 +1,7 @@
-<%- include('partials/header', { title: 'Fire events' }) %>
+<%- include('partials/header', { title: 'Booking log' }) %>
 <div class="panel">
-  <h2>Fire events</h2>
+  <h2>Booking log</h2>
+  <p class="muted">Every attempt the agent has made to book a recurring slot. <code>booked</code> means a booking was made; <code>no_time_available</code> means the slot was already taken; <code>technical_error</code> is a network / auth / server issue.</p>
   <table>
     <thead><tr><th>Time</th><th>Recurring</th><th>Account</th><th>Status</th><th>Court</th><th>Latency</th><th>Error</th></tr></thead>
     <tbody>
@@ -13,7 +14,7 @@
           <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
           <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
           <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
-          <% } else if (e.status === 'firing') { %><span class="pill info">firing</span>
+          <% } else if (e.status === 'attempting') { %><span class="pill info">attempting</span>
           <% } else { %><span class="pill"><%= e.status %></span><% } %>
         </td>
         <td><%= e.court_booked || e.court_attempted || '—' %></td>
@@ -21,7 +22,7 @@
         <td class="muted" style="max-width: 300px; overflow:hidden; text-overflow:ellipsis;" title="<%= e.error || '' %>"><%= e.error || '' %></td>
       </tr>
     <% }) %>
-    <% if (!events.length) { %><tr><td colspan="7" class="muted">No fire events yet.</td></tr><% } %>
+    <% if (!events.length) { %><tr><td colspan="7" class="muted">No booking attempts yet.</td></tr><% } %>
     </tbody>
   </table>
 </div>

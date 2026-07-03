@@ -1,9 +1,9 @@
 <%- include('partials/header', { title: 'Overview' }) %>
 <div class="row">
   <div class="panel">
-    <h2>Upcoming fires (next 5)</h2>
+    <h2>Upcoming bookings (next 5)</h2>
     <table>
-      <thead><tr><th>Label</th><th>Account</th><th>Pattern</th><th>Next fire</th><th>Action</th></tr></thead>
+      <thead><tr><th>Label</th><th>Account</th><th>Pattern</th><th>Next attempt</th><th>Action</th></tr></thead>
       <tbody>
       <% recurringRows.filter(r => r.enabled).sort((a,b) => new Date(a.next_fire_at) - new Date(b.next_fire_at)).slice(0,5).forEach(function(r) { %>
         <tr>
@@ -11,7 +11,7 @@
           <td>#<%= r.account_id %></td>
           <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
           <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
-          <td><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action || '—' %></span></td>
+          <td><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
         </tr>
       <% }) %>
       <% if (!recurringRows.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/recurring">Recurring</a>.</td></tr><% } %>
@@ -20,7 +20,7 @@
   </div>
 
   <div class="panel">
-    <h2>Recent fire events</h2>
+    <h2>Recent booking attempts</h2>
     <table>
       <thead><tr><th>Time</th><th>Recurring</th><th>Status</th><th>Court</th><th>Latency</th></tr></thead>
       <tbody>
@@ -38,7 +38,7 @@
           <td class="muted"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
         </tr>
       <% }) %>
-      <% if (!fireEvents.length) { %><tr><td colspan="5" class="muted">No fires yet.</td></tr><% } %>
+      <% if (!fireEvents.length) { %><tr><td colspan="5" class="muted">No booking attempts yet.</td></tr><% } %>
       </tbody>
     </table>
   </div>
@@ -56,7 +56,7 @@
           <td><%= a.username %></td>
           <td>
             <% var s = a.state || 'waiting'; %>
-            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(s)) cls='err'; else if (['primed','firing','first_immediate'].includes(s)) cls='warn'; else if (['token_ready','tested_ok'].includes(s)) cls='info'; %>
+            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(s)) cls='err'; else if (['primed','attempting','first_immediate'].includes(s)) cls='warn'; else if (['token_ready','tested_ok'].includes(s)) cls='info'; %>
             <span class="pill <%= cls %>"><%= s %></span>
             <% if (a.state_msg) { %><div class="muted" style="font-size:11px;"><%= a.state_msg %></div><% } %>
           </td>

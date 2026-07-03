@@ -49,7 +49,7 @@ async function prepareForFire(rec, fireMs) {
   return { courts, pref, apiPref, fireMs, slot, primed };
 }
 
-async function executeScheduledFire(rec, fireMs) {
+async function executeScheduledBooking(rec, fireMs) {
   log.info('scheduler.fire', { recurring: rec.id, label: rec.label, fireMs });
   let prepared;
   try {
@@ -73,7 +73,7 @@ async function executeScheduledFire(rec, fireMs) {
   schedule(rec.id);
 }
 
-async function executeImmediateFire(rec) {
+async function executeImmediateBooking(rec) {
   log.info('scheduler.immediate', { recurring: rec.id, label: rec.label });
   // The immediate path: use the next_fire_at directly as the target slot
   const fireMs = nextFireUtcMs(rec) || Date.now();
@@ -113,7 +113,7 @@ function schedule(recurringId) {
   log.info('scheduler.arm', { recurring: recurringId, nextUtc, deltaMs: delta, isImmediate });
   if (isImmediate) {
     const fireTimer = setTimeout(() => {
-      executeImmediateFire(rec).catch(e => log.error('scheduler.immediate.error', { recurring: recurringId, error: e.message }));
+      executeImmediateBooking(rec).catch(e => log.error('scheduler.immediate.error', { recurring: recurringId, error: e.message }));
     }, 200);
     timers.set(recurringId, { fireTimer });
     return;
@@ -128,7 +128,7 @@ function schedule(recurringId) {
     }).catch(e => log.error('scheduler.warm.error', { recurring: recurringId, error: e.message }));
   }, warmDelta);
   const fireTimer = setTimeout(() => {
-    executeScheduledFire(rec, nextUtc).catch(e => log.error('scheduler.fire.error', { recurring: recurringId, error: e.message }));
+    executeScheduledBooking(rec, nextUtc).catch(e => log.error('scheduler.fire.error', { recurring: recurringId, error: e.message }));
   }, delta);
   timers.set(recurringId, { warmTimer, fireTimer });
 }
@@ -181,4 +181,7 @@ function listActive() {
   return out;
 }
 
-module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateFire, executeScheduledFire, slotForFire, SESSION_LEAD_MS };
+module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, SESSION_LEAD_MS };
+// backward-compat aliases
+module.exports.executeImmediateFire = module.exports.executeImmediateBooking;
+module.exports.executeScheduledFire = module.exports.executeScheduledBooking;

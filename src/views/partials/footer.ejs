@@ -9,10 +9,12 @@
       }
       return r.json();
     }
-    async function fireNowBtn(id) {
-      try { const r = await jsonReq('/api/recurring/' + id + '/fire-now', { method: 'POST' }); alert('Fire: ' + JSON.stringify(r)); location.reload(); }
+    async function bookNowBtn(id) {
+      try { const r = await jsonReq('/api/recurring/' + id + '/book-now', { method: 'POST' }); alert('Book: ' + JSON.stringify(r)); location.reload(); }
       catch (e) { alert(e.message); }
     }
+    // backward-compat alias used by older templates
+    async function fireNowBtn(id) { return bookNowBtn(id); }
     async function dismissError(id) {
       try { await jsonReq('/api/recurring/' + id + '/dismiss-error', { method: 'POST' }); location.reload(); }
       catch (e) { alert(e.message); }

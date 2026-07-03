@@ -57,11 +57,14 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
   res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account }));
 });
 
-router.get('/fire-events', requireAdmin, (req, res) => {
+router.get('/booking-log', requireAdmin, (req, res) => {
   const events = repo.fireEvents.list({ limit: 200, status: req.query.status || null, recurringId: req.query.recurring_id ? parseInt(req.query.recurring_id, 10) : null });
   const accounts = repo.accounts.list();
-  res.render('fire_events', withLocals({ events, accounts }));
+  res.render('booking_log', withLocals({ events, accounts }));
 });
+
+// Backward-compat alias for the old /fire-events page
+router.get('/fire-events', requireAdmin, (req, res) => res.redirect('/booking-log'));
 
 router.get('/audit', requireAdmin, (req, res) => {
   const entries = repo.audit.list({ limit: 200 });

@@ -23,7 +23,7 @@
         <td><%= a.label %></td>
         <td><%= a.username %></td>
         <td>
-          <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(a.state)) cls='err'; else if (['primed','firing','first_immediate'].includes(a.state)) cls='warn'; else if (['token_ready','tested_ok'].includes(a.state)) cls='info'; %>
+            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(a.state)) cls='err'; else if (['primed','attempting','first_immediate'].includes(a.state)) cls='warn'; else if (['token_ready','tested_ok'].includes(a.state)) cls='info'; %>
           <span class="pill <%= cls %>"><%= a.state || 'waiting' %></span>
           <% if (a.state_msg) { %><div class="muted" style="font-size:11px;"><%= a.state_msg %></div><% } %>
           <% if (a.session_expires_at) { %><div class="muted" style="font-size:11px;">session expires: <%= a.session_expires_at %></div><% } %>
