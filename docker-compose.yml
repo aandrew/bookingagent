@@ -19,11 +19,14 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    command: ["/usr/bin/caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    env_file: .env
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-build/caddy:/usr/bin/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

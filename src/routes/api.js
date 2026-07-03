@@ -11,7 +11,7 @@ const recurring = require('../agent/recurring');
 const scheduler = require('../agent/scheduler');
 const state = require('../agent/state');
 const { probeSession } = require('../kooroo/auth');
-const { buildClientForAccount } = require('../kooroo/client');
+const { KoorooClient } = require('../kooroo/client');
 
 function presentAccount(a) {
   if (!a) return null;
@@ -75,9 +75,20 @@ router.post('/accounts/:id/relogin', requireAdmin, async (req, res) => {
 router.post('/accounts/:id/probe', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const client = buildClientForAccount(repo.accounts.get(id));
+    const account = repo.accounts.get(id);
+    if (!account) return res.status(404).json({ error: 'not_found' });
+    const client = new KoorooClient(account);
     await client.hydrateFromSession();
     const r = await probeSession(client);
+    if (r.ok) {
+      if (client.userId) {
+        state.transition(id, state.STATES.TOKEN_READY, 'probe ok');
+      } else {
+        state.transition(id, state.STATES.TESTED_OK, 'probe ok, params missing');
+      }
+    } else {
+      state.transition(id, state.STATES.SESSION_EXPIRED, `probe failed: ${r.status || r.error || 'unknown'}`);
+    }
     res.json(r);
   } catch (e) {
     res.status(500).json({ error: e.message });
