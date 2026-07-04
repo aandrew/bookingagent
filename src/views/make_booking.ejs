@@ -310,7 +310,8 @@
       const recurring = isRecurring ? r : null;
 
       // v3.3: render the result based on what actually happened.
-      let title, body, cls;
+      // Use distinct names (no shadowing of the outer `body` / `label`).
+      let title, resultHtml, cls;
 
       if (recurring) {
         // Recurring creation: server has already attempted the first fire (since
@@ -324,7 +325,7 @@
           extra = ' First occurrence is being attempted now — check the booking log for the outcome.';
         }
         title = '✓ Recurring booking created — label: <code>' + (recurring.label || label) + '</code>';
-        body = '<p class="muted" style="font-size: 12px; margin: 4px 0;">' + (extra || 'Find it in <a href="/bookings">Current Bookings</a>.') + '</p>'
+        resultHtml = '<p class="muted" style="font-size: 12px; margin: 4px 0;">' + (extra || 'Find it in <a href="/bookings">Current Bookings</a>.') + '</p>'
           + '<pre>' + JSON.stringify(recurring, null, 2) + '</pre>';
         cls = 'ok';
       } else if (watch) {
@@ -332,51 +333,51 @@
         const a = attempt || { status: 'unknown' };
         if (a.status === 'booked') {
           title = '✓ Booking confirmed — label: <code>' + (watch.label || label) + '</code>';
-          body = '<p style="margin: 4px 0;">Booked on Koorora at ' + (a.body?.time || watch.time_start) + ' on ' + (watch.date_from || a.date) + '. Check <a href="/bookings">Current Bookings</a>.</p>'
+          resultHtml = '<p style="margin: 4px 0;">Booked on Koorora at ' + (a.body?.time || watch.time_start) + ' on ' + (watch.date_from || a.date) + '. Check <a href="/bookings">Current Bookings</a>.</p>'
             + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'ok';
         } else if (a.status === 'scheduled') {
           title = '⏱ Booking queued — label: <code>' + (watch.label || label) + '</code>';
-          body = '<p style="margin: 4px 0;">' + (a.reason || 'Date is more than 7 days out. The system will attempt this automatically when the booking window opens.') + '</p>'
+          resultHtml = '<p style="margin: 4px 0;">' + (a.reason || 'Date is more than 7 days out. The system will attempt this automatically when the booking window opens.') + '</p>'
             + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'ok';
         } else if (a.status === 'no-match') {
           title = '⚠ No open slot for label <code>' + (watch.label || label) + '</code>';
-          body = '<p style="margin: 4px 0;">Checked ' + (a.candidates ?? 0) + ' candidate slots on ' + (a.date || watch.date_from) + ' — none were open at the requested time. The watch is saved and the monitor loop will keep trying on each boot, but you may want to <a href="/watches">pick a different time</a>.</p>'
+          resultHtml = '<p style="margin: 4px 0;">Checked ' + (a.candidates ?? 0) + ' candidate slots on ' + (a.date || watch.date_from) + ' — none were open at the requested time. The watch is saved and the monitor loop will keep trying on each boot, but you may want to <a href="/watches">pick a different time</a>.</p>'
             + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'err';
         } else if (a.status === 'failed') {
           const errMsg = a.body?.message || a.error || 'unknown';
           title = '✗ Booking failed for label <code>' + (watch.label || label) + '</code>';
-          body = '<p style="margin: 4px 0;">Reason: <code>' + errMsg + '</code></p>'
+          resultHtml = '<p style="margin: 4px 0;">Reason: <code>' + errMsg + '</code></p>'
             + '<p class="muted" style="font-size: 12px;">The watch row is saved with this status. Click "Book now" on the Watches page to retry, or <a href="/accounts">Re-login</a> if your session expired.</p>'
             + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'err';
         } else if (a.status === 'skipped') {
           title = '⊘ Booking skipped for label <code>' + (watch.label || label) + '</code>';
-          body = '<p style="margin: 4px 0;">' + (a.error || 'account disabled or missing') + '</p>'
+          resultHtml = '<p style="margin: 4px 0;">' + (a.error || 'account disabled or missing') + '</p>'
             + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'err';
         } else if (a.status === 'error') {
           title = '✗ Booking error for label <code>' + (watch.label || label) + '</code>';
-          body = '<p style="margin: 4px 0;">' + (a.error || 'unknown') + '</p>'
+          resultHtml = '<p style="margin: 4px 0;">' + (a.error || 'unknown') + '</p>'
             + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'err';
         } else {
           title = '? Booking attempt returned status: ' + a.status;
-          body = '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          resultHtml = '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
           cls = 'err';
         }
       } else {
         title = '? Unexpected response';
-        body = '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+        resultHtml = '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
         cls = 'err';
       }
 
       status.textContent = cls === 'ok' ? 'Saved.' : 'Failed.';
       result.style.display = 'block';
       result.className = 'result-panel ' + cls;
-      result.innerHTML = '<h3>' + title + '</h3>' + body;
+      result.innerHTML = '<h3>' + title + '</h3>' + resultHtml;
       // Auto-redirect only on clean success
       if (cls === 'ok') {
         setTimeout(() => { location.href = '/bookings'; }, 2000);
