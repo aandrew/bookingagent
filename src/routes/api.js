@@ -101,7 +101,7 @@ router.get('/accounts/:id/state', requireAdmin, (req, res) => {
 });
 
 router.get('/watches', requireAdmin, (req, res) => res.json(repo.watches.list()));
-router.post('/watches', requireAdmin, (req, res) => {
+router.post('/watches', requireAdmin, async (req, res) => {
   const w = req.body || {};
   if (!w.account_id) return res.status(400).json({ error: 'account_id is required' });
   if (!w.date_from) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
@@ -141,7 +141,24 @@ router.post('/watches', requireAdmin, (req, res) => {
   }
   // lead_days is ignored — we have an explicit date. Default 7 for legacy readers.
   w.lead_days = 7;
-  res.status(201).json(repo.watches.create(w));
+  const created = repo.watches.create(w);
+  // v3.3: For "watch" (within 7 days) the user expects the booking to be
+  // attempted NOW. monitor.runWatch ensures the session (relogin via
+  // Playwright if needed) and tries to book. We return both the created row
+  // and the attempt outcome so the form can show what actually happened.
+  // For "scheduled" (further than 7 days out) we don't attempt — the
+  // monitor loop will pick it up at the right time.
+  let attempt = null;
+  if (created.strategy === 'watch') {
+    try {
+      attempt = await monitor.runWatch(created);
+    } catch (e) {
+      attempt = { status: 'error', error: e.message };
+    }
+  } else {
+    attempt = { status: 'scheduled', reason: 'date is more than 7 days out — will be attempted automatically when the booking window opens' };
+  }
+  res.status(201).json({ watch: created, attempt });
 });
 router.patch('/watches/:id', requireAdmin, (req, res) => {
   res.json(repo.watches.update(parseInt(req.params.id, 10), req.body || {}));

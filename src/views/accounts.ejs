@@ -31,11 +31,10 @@
 <div class="panel">
   <h2>Accounts</h2>
   <table>
-    <thead><tr><th>#</th><th>Label</th><th>User</th><th>State</th><th>Session</th><th>Enabled</th><th></th></tr></thead>
+    <thead><tr><th>Label</th><th>User</th><th>State</th><th>Session</th><th>Enabled</th><th></th></tr></thead>
     <tbody>
     <% accounts.forEach(function(a) { const s = sessionsById[a.id]; %>
       <tr>
-        <td><%= a.id %></td>
         <td><%= a.label %></td>
         <td><%= a.username %></td>
         <td>

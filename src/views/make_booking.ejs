@@ -300,23 +300,87 @@
 
     try {
       const r = await jsonReq(path, { method: 'POST', body: JSON.stringify(body) });
-      let extra = '';
-      if (r.court_auto_allocated && r.original_court_pref) {
-        extra = ' — court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + ' (C' + r.original_court_pref + ' was already taken at this time).';
-      } else if (r.no_courts_available) {
-        extra = ' — NO COURTS AVAILABLE: all 3 courts are taken at this time slot.';
-      } else if (r.first_occurrence_action) {
-        extra = ' — first occurrence: ' + r.first_occurrence_action;
-      }
-      status.textContent = 'Saved.';
       const result = document.getElementById('result');
+
+      // For one-off (watches) the server now returns { watch, attempt }.
+      // For recurring it returns the recurring object directly.
+      const isRecurring = recurringOn;
+      const watch = isRecurring ? null : r.watch;
+      const attempt = isRecurring ? null : r.attempt;
+      const recurring = isRecurring ? r : null;
+
+      // v3.3: render the result based on what actually happened.
+      let title, body, cls;
+
+      if (recurring) {
+        // Recurring creation: server has already attempted the first fire (since
+        // first_occurrence_action is always book_now for recurring).
+        let extra = '';
+        if (recurring.court_auto_allocated && recurring.original_court_pref) {
+          extra = ' Court auto-allocated from C' + recurring.original_court_pref + ' → C' + recurring.court_pref + ' (C' + recurring.original_court_pref + ' was already taken at this time).';
+        } else if (recurring.no_courts_available) {
+          extra = ' NO COURTS AVAILABLE: all 3 courts are taken at this time slot.';
+        } else if (recurring.first_occurrence_action === 'book_now') {
+          extra = ' First occurrence is being attempted now — check the booking log for the outcome.';
+        }
+        title = '✓ Recurring booking created — label: <code>' + (recurring.label || label) + '</code>';
+        body = '<p class="muted" style="font-size: 12px; margin: 4px 0;">' + (extra || 'Find it in <a href="/bookings">Current Bookings</a>.') + '</p>'
+          + '<pre>' + JSON.stringify(recurring, null, 2) + '</pre>';
+        cls = 'ok';
+      } else if (watch) {
+        // One-off: show what the immediate attempt did.
+        const a = attempt || { status: 'unknown' };
+        if (a.status === 'booked') {
+          title = '✓ Booking confirmed — label: <code>' + (watch.label || label) + '</code>';
+          body = '<p style="margin: 4px 0;">Booked on Koorora at ' + (a.body?.time || watch.time_start) + ' on ' + (watch.date_from || a.date) + '. Check <a href="/bookings">Current Bookings</a>.</p>'
+            + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'ok';
+        } else if (a.status === 'scheduled') {
+          title = '⏱ Booking queued — label: <code>' + (watch.label || label) + '</code>';
+          body = '<p style="margin: 4px 0;">' + (a.reason || 'Date is more than 7 days out. The system will attempt this automatically when the booking window opens.') + '</p>'
+            + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'ok';
+        } else if (a.status === 'no-match') {
+          title = '⚠ No open slot for label <code>' + (watch.label || label) + '</code>';
+          body = '<p style="margin: 4px 0;">Checked ' + (a.candidates ?? 0) + ' candidate slots on ' + (a.date || watch.date_from) + ' — none were open at the requested time. The watch is saved and the monitor loop will keep trying on each boot, but you may want to <a href="/watches">pick a different time</a>.</p>'
+            + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'err';
+        } else if (a.status === 'failed') {
+          const errMsg = a.body?.message || a.error || 'unknown';
+          title = '✗ Booking failed for label <code>' + (watch.label || label) + '</code>';
+          body = '<p style="margin: 4px 0;">Reason: <code>' + errMsg + '</code></p>'
+            + '<p class="muted" style="font-size: 12px;">The watch row is saved with this status. Click "Book now" on the Watches page to retry, or <a href="/accounts">Re-login</a> if your session expired.</p>'
+            + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'err';
+        } else if (a.status === 'skipped') {
+          title = '⊘ Booking skipped for label <code>' + (watch.label || label) + '</code>';
+          body = '<p style="margin: 4px 0;">' + (a.error || 'account disabled or missing') + '</p>'
+            + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'err';
+        } else if (a.status === 'error') {
+          title = '✗ Booking error for label <code>' + (watch.label || label) + '</code>';
+          body = '<p style="margin: 4px 0;">' + (a.error || 'unknown') + '</p>'
+            + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'err';
+        } else {
+          title = '? Booking attempt returned status: ' + a.status;
+          body = '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+          cls = 'err';
+        }
+      } else {
+        title = '? Unexpected response';
+        body = '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+        cls = 'err';
+      }
+
+      status.textContent = cls === 'ok' ? 'Saved.' : 'Failed.';
       result.style.display = 'block';
-      result.className = 'result-panel ok';
-      result.innerHTML = '<h3>✓ Booking created — label: <code>' + label + '</code></h3>'
-        + '<p class="muted" style="font-size: 12px; margin: 4px 0;">' + (extra || 'Find it in <a href="/bookings">Current Bookings</a>.') + '</p>'
-        + '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
-      // Auto-redirect after a short pause
-      setTimeout(() => { location.href = '/bookings'; }, 1500);
+      result.className = 'result-panel ' + cls;
+      result.innerHTML = '<h3>' + title + '</h3>' + body;
+      // Auto-redirect only on clean success
+      if (cls === 'ok') {
+        setTimeout(() => { location.href = '/bookings'; }, 2000);
+      }
     } catch (e) {
       const friendly = explainError(e, path);
       status.textContent = 'Failed.';
