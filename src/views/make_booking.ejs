@@ -1,0 +1,82 @@
+<%- include('partials/header', { title: 'Make Booking' }) %>
+<div class="panel">
+  <h2>Make Booking</h2>
+  <form id="addForm" onsubmit="addBooking(event)">
+    <div class="grid2">
+      <div><label>Account</label>
+        <select name="account_id" required>
+          <% accounts.forEach(function(a) { %><option value="<%= a.id %>"><%= a.label %> (<%= a.username %>)</option><% }) %>
+        </select>
+      </div>
+      <div><label>Label</label><input type="text" name="label" required></div>
+      <div><label>Court (optional)</label>
+        <select name="court">
+          <option value="">— any (auto-allocate) —</option>
+          <option value="4">Court 4</option>
+          <option value="5">Court 5</option>
+          <option value="6">Court 6</option>
+        </select>
+      </div>
+      <div><label>Strategy</label>
+        <select name="strategy"><option value="watch">watch</option><option value="scheduled">scheduled</option></select>
+      </div>
+      <div><label>Date (from)</label><input type="text" name="date_from" placeholder="YYYY-MM-DD"></div>
+      <div><label>Date (to)</label><input type="text" name="date_to" placeholder="YYYY-MM-DD"></div>
+      <div><label>Time start</label><input type="text" name="time_start" placeholder="HH:MM"></div>
+      <div><label>Time end</label><input type="text" name="time_end" placeholder="HH:MM"></div>
+      <div><label>Lead days</label><input type="number" name="lead_days" value="7"></div>
+      <div><label>Duration (mins)</label><input type="number" name="duration_mins" value="60"></div>
+    </div>
+    <div style="margin-top: 10px;">
+      <label style="display:inline-block; font-size: 14px; color: var(--text); margin: 0;">
+        <input type="checkbox" id="makeRecurring" onchange="document.getElementById('recurringFields').classList.toggle('hidden', !this.checked)">
+        Make this a <strong>recurring</strong> weekly booking
+      </label>
+    </div>
+    <div id="recurringFields" class="hidden grid2" style="margin-top: 8px;">
+      <div><label>Day of week (recurring)</label>
+        <select name="recurring_day_of_week">
+          <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
+          <option value="3" selected>Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+        </select>
+      </div>
+      <div><label>Time (recurring, Sydney)</label><input type="time" name="recurring_time" value="19:00"></div>
+    </div>
+    <div style="margin-top: 10px;"><button type="submit">Add booking</button></div>
+  </form>
+</div>
+<script>
+  async function addBooking(e) {
+    e.preventDefault();
+    const f = e.target;
+    const recurringOn = f.makeRecurring?.checked;
+    if (recurringOn) {
+      const body = {
+        account_id: parseInt(f.account_id.value, 10),
+        label: f.label.value,
+        day_of_week: parseInt(f.recurring_day_of_week.value, 10),
+        time: f.recurring_time.value,
+        court_pref: f.court.value || null,
+        duration_mins: parseInt(f.duration_mins.value, 10) || 60,
+      };
+      try {
+        const r = await jsonReq('/api/recurring', { method: 'POST', body: JSON.stringify(body) });
+        let msg = 'Created recurring #' + r.id + ' (' + r.first_occurrence_action + ')';
+        if (r.court_auto_allocated && r.original_court_pref) {
+          msg += ' — court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + ' (C' + r.original_court_pref + ' was already taken at this time).';
+        } else if (r.no_courts_available) {
+          msg += ' — NO COURTS AVAILABLE: all 3 courts are taken at this time slot.';
+        }
+        alert(msg);
+        location.href = '/bookings';
+      } catch (e) { alert(e.message); }
+      return;
+    }
+    // one-off watch
+    const body = {};
+    for (const el of f.elements) if (el.name && !el.name.startsWith('recurring_')) body[el.name] = el.value;
+    try { await jsonReq('/api/watches', { method: 'POST', body: JSON.stringify(body) }); location.href = '/bookings'; }
+    catch (e) { alert(e.message); }
+  }
+</script>
+<%- include('partials/footer') %>

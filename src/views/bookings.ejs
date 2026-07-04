@@ -1,6 +1,37 @@
-<%- include('partials/header', { title: 'Bookings' }) %>
+<%- include('partials/header', { title: 'Current Bookings' }) %>
+
 <div class="panel">
-  <h2>Bookings</h2>
+  <h2>Upcoming recurring</h2>
+  <table>
+    <thead><tr><th>#</th><th>Label</th><th>Account</th><th>Info</th><th>Next attempt</th><th>State</th><th></th></tr></thead>
+    <tbody>
+    <% recurringRows.forEach(function(r) { %>
+      <tr>
+        <td><%= r.id %></td>
+        <td>
+          <%= r.label %>
+          <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
+        </td>
+        <td class="muted"><%= r.account_label || '#' + r.account_id %><% if (r.account_username) { %> (<%= format.truncate(r.account_username, 12) %>)<% } %></td>
+        <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
+        <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
+        <td>
+          <% if (!r.enabled) { %><span class="pill">disabled</span>
+          <% } else if (r.first_occurrence_action === 'book_now') { %><span class="pill warn">booking</span>
+          <% } else { %><span class="pill info"><%= r.first_occurrence_action || 'scheduled' %></span><% } %>
+        </td>
+        <td>
+          <a href="/recurring/<%= r.id %>"><button class="secondary" type="button">Manage</button></a>
+        </td>
+      </tr>
+    <% }) %>
+    <% if (!recurringRows.length) { %><tr><td colspan="7" class="muted">No recurring bookings yet — add one in <a href="/make-booking">Make Booking</a>.</td></tr><% } %>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Confirmed bookings</h2>
   <table>
     <thead><tr><th>#</th><th>Account</th><th>When</th><th>Court</th><th>Status</th><th>External ID</th><th>Created</th><th></th></tr></thead>
     <tbody>

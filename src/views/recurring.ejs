@@ -64,7 +64,8 @@
           <% } else { %>—<% } %>
         </td>
         <td>
-          <% if (r.last_status === 'booked') { %><span class="pill ok">booked</span>
+          <% if (r.last_error_category === 'no_courts_available') { %><span class="pill err">no courts available</span>
+          <% } else if (r.last_status === 'booked') { %><span class="pill ok">booked</span>
           <% } else if (r.last_status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
           <% } else if (r.last_status === 'technical_error' || r.last_status === 'failed') { %><span class="pill err">technical_error</span>
           <% } else if (r.last_status) { %><span class="pill"><%= r.last_status %></span>

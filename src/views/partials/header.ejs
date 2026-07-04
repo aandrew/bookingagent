@@ -65,11 +65,10 @@
     <% if (user) { %>
       <nav>
         <a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">Overview</a>
-        <a href="/recurring" class="<%= currentPath.startsWith('/recurring') ? 'active' : '' %>">Recurring</a>
-        <a href="/accounts" class="<%= currentPath.startsWith('/accounts') ? 'active' : '' %>">Accounts</a>
-        <a href="/watches" class="<%= currentPath.startsWith('/watches') ? 'active' : '' %>">Watches</a>
-        <a href="/bookings" class="<%= currentPath.startsWith('/bookings') ? 'active' : '' %>">Bookings</a>
+        <a href="/make-booking" class="<%= currentPath.startsWith('/make-booking') ? 'active' : '' %>">Make Booking</a>
+        <a href="/bookings" class="<%= currentPath.startsWith('/bookings') ? 'active' : '' %>">Current Bookings</a>
         <a href="/booking-log" class="<%= currentPath.startsWith('/booking-log') || currentPath.startsWith('/fire-events') ? 'active' : '' %>">Booking log</a>
+        <a href="/accounts" class="<%= currentPath.startsWith('/accounts') ? 'active' : '' %>">Accounts</a>
         <a href="/audit" class="<%= currentPath.startsWith('/audit') ? 'active' : '' %>">Audit</a>
         <a href="/settings" class="<%= currentPath.startsWith('/settings') ? 'active' : '' %>">Settings</a>
       </nav>

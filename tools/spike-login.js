@@ -181,8 +181,6 @@ async function main() {
     fs.writeFileSync(path.join(outDir, 'spike-manifest.json'), JSON.stringify(manifest, null, 2));
     fs.writeFileSync(path.join(outDir, 'spike-console.log'), consoleLines.join('\n'));
     fs.writeFileSync(path.join(outDir, 'spike-requests.log'), requestLog.join('\n'));
-    await context.close();
-    await browser.close();
     console.log('\nArtifacts in', outDir);
     console.log('  spike.har              request/response archive');
     console.log('  spike-cookies.json     cookies after login');
@@ -190,6 +188,11 @@ async function main() {
     console.log('  spike-requests.log     every booking/admin-ajax call');
     console.log('  spike-*.png            screenshots');
     console.log('\nNext: npm run extract');
+    // Browser shutdown can hang on stuck pages (Google Analytics keeps the
+    // network busy for ~30s). The artifacts are already on disk; force-exit
+    // the Node process so the spike never blocks longer than "the time it
+    // took to do the steps". The OS reaps the orphaned browser subprocess.
+    process.exit(0);
   }
 }
 

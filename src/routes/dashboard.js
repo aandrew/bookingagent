@@ -37,10 +37,21 @@ router.get('/watches', requireAdmin, (req, res) => {
   res.render('watches', withLocals({ watches, accounts }));
 });
 
+router.get('/make-booking', requireAdmin, (req, res) => {
+  const accounts = repo.accounts.list();
+  res.render('make_booking', withLocals({ accounts }));
+});
+
 router.get('/bookings', requireAdmin, (req, res) => {
   const bookings = repo.bookings.list({ limit: 200 });
+  const recurringRows = recurring.list();
   const accounts = repo.accounts.list();
-  res.render('bookings', withLocals({ bookings, accounts }));
+  const userById = Object.fromEntries(accounts.map(a => [a.id, a]));
+  for (const r of recurringRows) {
+    r.account_label = userById[r.account_id]?.label || null;
+    r.account_username = userById[r.account_id]?.username || null;
+  }
+  res.render('bookings', withLocals({ bookings, accounts, recurringRows }));
 });
 
 router.get('/recurring', requireAdmin, (req, res) => {

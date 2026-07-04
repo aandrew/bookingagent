@@ -43,6 +43,7 @@ const config = {
   bind: process.env.BIND || '0.0.0.0',
   pollCron: process.env.POLL_CRON || '*/2 * * * *',
   sessionProbeCron: process.env.SESSION_PROBE_CRON || '*/10 * * * *',
+  sessionCheckOffsetMinutes: intEnv('SESSION_CHECK_OFFSET_MINUTES', 5),
   defaultLeadDays: intEnv('DEFAULT_LEAD_DAYS', 7),
   defaultLeadMinutesBeforeFire: intEnv('LEAD_MINUTES_BEFORE_FIRE', 5),
   backups: {

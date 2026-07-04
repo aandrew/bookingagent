@@ -183,11 +183,21 @@ test('v2.1: recurring.chain advances next_fire_at to slot + 7d', () => {
   repo.accounts.remove(a.id);
 });
 
-test('v2.1: recurring.add — court_pref must be 4, 5, or 6', () => {
+test('v2.1: recurring.add — invalid court_pref falls back via allocator (no_courts_available)', () => {
+  // v3.1: the court auto-allocator catches invalid court_pref values and falls
+  // back to the first allowed court, marking the row as no_courts_available
+  // (since "99" is not in [4,5,6], the allocator treats the requested court as
+  // unallocatable). Invalid values inside an explicit `courts` array still
+  // throw via validate().
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
   const a = repo.accounts.create({ label: 'r3', username: 'u3', password: 'p' });
-  assert.throws(() => recurring.add({ account_id: a.id, label: 'x', day_of_week: 3, time: '19:00', court_pref: '99' }));
+  const r = recurring.add({ account_id: a.id, label: 'x', day_of_week: 3, time: '19:00', court_pref: '99' });
+  assert.equal(r.court_pref, '4');
+  assert.equal(r.last_error_category, 'no_courts_available');
+  assert.equal(r.last_status, 'failed');
   assert.throws(() => recurring.add({ account_id: a.id, label: 'x', day_of_week: 3, time: '19:00', court_pref: '5', courts: ['99'] }));
   repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
 test('v2.1: dismissError + listUnacknowledgedErrors', async () => {
@@ -425,6 +435,138 @@ test('v3: recurring.add auto-generates label and uses fallback_enabled', () => {
 test('v3: config has defaultLeadMinutesBeforeFire default of 5', () => {
   const config = require('../src/config');
   assert.equal(config.defaultLeadMinutesBeforeFire, 5);
+});
+
+// ---- v3.1: court auto-allocation ----
+const courtAllocator = require('../src/agent/courtAllocator');
+
+test('v3.1: courtAllocator.allocateCourt — free preferred', () => {
+  const r = courtAllocator.allocateCourt('4', []);
+  assert.equal(r.court, '4');
+  assert.equal(r.auto_allocated, false);
+  assert.equal(r.no_courts_available, false);
+});
+
+test('v3.1: courtAllocator.allocateCourt — preferred taken, picks next free', () => {
+  const r = courtAllocator.allocateCourt('4', ['4']);
+  assert.equal(r.court, '5');
+  assert.equal(r.auto_allocated, true);
+  assert.equal(r.original_court, '4');
+  assert.equal(r.no_courts_available, false);
+});
+
+test('v3.1: courtAllocator.allocateCourt — preferred + 1 other taken, picks remaining', () => {
+  const r = courtAllocator.allocateCourt('4', ['4', '5']);
+  assert.equal(r.court, '6');
+  assert.equal(r.auto_allocated, true);
+  assert.equal(r.original_court, '4');
+});
+
+test('v3.1: courtAllocator.allocateCourt — all three taken, no_courts_available', () => {
+  const r = courtAllocator.allocateCourt('4', ['4', '5', '6']);
+  assert.equal(r.court, null);
+  assert.equal(r.no_courts_available, true);
+});
+
+test('v3.1: courtAllocator.allocateCourt — invalid court_pref returns no_courts_available', () => {
+  const r = courtAllocator.allocateCourt('99', []);
+  assert.equal(r.no_courts_available, true);
+});
+
+test('v3.1: courtAllocator.findConflictingCourts — empty when no other recurring on slot', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca0', username: 'ca0', password: 'p' });
+  const c = courtAllocator.findConflictingCourts({ dayOfWeek: 5, time: '20:00' });
+  assert.deepEqual(c, []);
+  repo.accounts.remove(a.id);
+});
+
+test('v3.1: courtAllocator.findConflictingCourts — picks up same-slot same-court conflicts', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca1', username: 'ca1', password: 'p' });
+  recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  const c = courtAllocator.findConflictingCourts({ dayOfWeek: 5, time: '20:00' });
+  assert.deepEqual(c, ['4']);
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.1: courtAllocator.findConflictingCourts — different slot does NOT conflict', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca2', username: 'ca2', password: 'p' });
+  recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  const c = courtAllocator.findConflictingCourts({ dayOfWeek: 6, time: '09:00' });
+  assert.deepEqual(c, []);
+  // Same day, different time — also no conflict
+  const c2 = courtAllocator.findConflictingCourts({ dayOfWeek: 5, time: '21:00' });
+  assert.deepEqual(c2, []);
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.1: courtAllocator.findConflictingCourts — excludeId skips the row being updated', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca3', username: 'ca3', password: 'p' });
+  const r1 = recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  const c = courtAllocator.findConflictingCourts({ dayOfWeek: 5, time: '20:00', excludeId: r1.id });
+  assert.deepEqual(c, []);
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.1: courtAllocator.findConflictingCourts — no_courts_available rows do not count', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca4', username: 'ca4', password: 'p' });
+  // Force a no_courts_available row by inserting it directly.
+  const r1 = repo.recurring.create({
+    account_id: a.id, label: 'stale', court_pref: '4', courts: ['4','5','6'],
+    day_of_week: 5, time: '20:00', duration_mins: 60, lead_minutes: 10,
+    enabled: 1, first_occurrence_action: 'book_now', next_fire_at: new Date().toISOString(),
+  });
+  repo.recurring.setLastResult(r1.id, { status: 'failed', msg: 'no courts', category: 'no_courts_available' });
+  const c = courtAllocator.findConflictingCourts({ dayOfWeek: 5, time: '20:00' });
+  assert.deepEqual(c, []);
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.1: recurring.add auto-allocates when same court already taken on same slot', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca5', username: 'ca5', password: 'p' });
+  // First booking: C4
+  const r1 = recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  assert.equal(r1.court_pref, '4');
+  assert.equal(r1.court_auto_allocated, undefined);
+  // Second booking: asks for C4, must auto-allocate to C5
+  const r2 = recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  assert.equal(r2.court_pref, '5');
+  assert.equal(r2.court_auto_allocated, true);
+  assert.equal(r2.original_court_pref, '4');
+  // Third booking: asks for C6, must stay on C6 (not taken)
+  const r3 = recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '6' });
+  assert.equal(r3.court_pref, '6');
+  assert.equal(r3.court_auto_allocated, undefined);
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.1: recurring.add — 4th booking on same slot is marked no_courts_available', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'ca6', username: 'ca6', password: 'p' });
+  recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '5' });
+  const r3 = recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '6' });
+  assert.equal(r3.court_pref, '6');
+  const r4 = recurring.add({ account_id: a.id, day_of_week: 5, time: '20:00', court_pref: '4' });
+  assert.equal(r4.court_pref, '4');
+  assert.equal(r4.no_courts_available, true);
+  assert.equal(r4.last_error_category, 'no_courts_available');
+  assert.equal(r4.last_status, 'failed');
+  // It should also surface in the error banner
+  const banners = repo.recurring.listUnacknowledgedErrors();
+  assert.ok(banners.some(b => b.id === r4.id), 'expected no_courts_available recurring in banner');
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
 test('teardown', () => {

@@ -37,7 +37,11 @@ async function reloginWithBrowser(account) {
   const { spawnSync } = require('child_process');
   const path = require('path');
   const config = require('../config');
-  const fs = require('fs');
+  // 90s is enough for the spike on a clean reCAPTCHA pass; this keeps the
+  // scheduler sessionCheckTimer bounded so a stuck Playwright can't block
+  // the warmup that follows.
+  const SPIKE_TIMEOUT_MS = 90_000;
+  const IMPORT_TIMEOUT_MS = 30_000;
   const env = {
     ...process.env,
     KOOROO_SPIKE_USER: account.username,
@@ -46,16 +50,20 @@ async function reloginWithBrowser(account) {
     SPIKE_HEADED: '0',
   };
   const spike = path.join(__dirname, '..', '..', 'tools', 'spike-login.js');
-  const res = spawnSync('node', [spike], { env, encoding: 'utf8', timeout: 240_000 });
+  const res = spawnSync('node', [spike], { env, encoding: 'utf8', timeout: SPIKE_TIMEOUT_MS });
   if (res.status !== 0) {
-    throw new Error(`spike failed: ${res.stderr.slice(-500) || res.stdout.slice(-500)}`);
+    const errMsg = (res.stderr || '').slice(-500) || (res.stdout || '').slice(-500) || `exit ${res.status} signal ${res.signal}`;
+    throw new Error(`spike failed: ${errMsg}`);
   }
   // Re-import the freshly captured session.
   const importer = path.join(__dirname, '..', '..', 'tools', 'import-session.js');
   const imp = spawnSync('node', [importer, '--label', account.label, '--username', account.username, '--probe'], {
-    env, encoding: 'utf8', timeout: 60_000,
+    env, encoding: 'utf8', timeout: IMPORT_TIMEOUT_MS,
   });
-  if (imp.status !== 0) throw new Error(`import failed: ${imp.stderr.slice(-500) || imp.stdout.slice(-500)}`);
+  if (imp.status !== 0) {
+    const errMsg = (imp.stderr || '').slice(-500) || (imp.stdout || '').slice(-500) || `exit ${imp.status} signal ${imp.signal}`;
+    throw new Error(`import failed: ${errMsg}`);
+  }
   return { status: 200, body: { ok: true, reloggedIn: true } };
 }
 

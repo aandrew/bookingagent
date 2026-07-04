@@ -5,6 +5,7 @@ const time = require('./time');
 const state = require('./state');
 const warmup = require('./warmup');
 const fire = require('./fire');
+const courtAllocator = require('./courtAllocator');
 const log = require('../logger');
 const config = require('../config');
 const endpoints = require('../kooroo/endpoints.json');
@@ -12,7 +13,7 @@ const { KoorooClient } = require('../kooroo/client');
 const fmt = require('../lib/format');
 
 // Allowed courts (C-numbers the user picks; mapped to API court_ids).
-const ALLOWED_COURTS = ['4', '5', '6']; // C4, C5, C6
+const ALLOWED_COURTS = courtAllocator.ALLOWED_COURTS; // ['4','5','6']
 const COURT_TO_API = { '4': '5', '5': '6', '6': '7' };
 const API_TO_COURT = { '5': '4', '6': '5', '7': '6' };
 
@@ -44,12 +45,12 @@ function validate(rec) {
 function normalize(rec) {
   const out = { ...rec };
   if (typeof rec.fallback_enabled === 'boolean') {
-    out.courts = computeFallbackOrder(rec.court_pref, rec.fallback_enabled);
+    out.courts = computeFallbackOrder(out.court_pref, rec.fallback_enabled);
   } else if (rec.courts && rec.courts.length) {
-    const unique = [rec.court_pref, ...rec.courts.filter(c => c !== rec.court_pref)];
+    const unique = [out.court_pref, ...rec.courts.filter(c => c !== out.court_pref)];
     out.courts = unique;
   } else {
-    out.courts = [rec.court_pref];
+    out.courts = [out.court_pref];
   }
   // Auto-generate label if not provided
   if (!out.label) {
@@ -68,7 +69,17 @@ function present(r) {
 }
 
 function add(input) {
-  const rec = normalize(input);
+  // Resolve court auto-allocation BEFORE normalize (so fallback order reflects the chosen court).
+  const dayOfWeek = parseInt(input.day_of_week, 10);
+  const timeStr = String(input.time || '');
+  const requestedCourt = input.court_pref;
+  const alloc = courtAllocator.resolveForRecurring({ dayOfWeek, time: timeStr, courtPref: requestedCourt, excludeId: null });
+  // If no_courts_available, we still want to create the row (so the user sees the error)
+  // but we keep the requested court_pref so validate() passes and the row has a real value.
+  const courtPref = alloc.no_courts_available
+    ? (ALLOWED_COURTS.includes(String(requestedCourt)) ? String(requestedCourt) : ALLOWED_COURTS[0])
+    : alloc.court;
+  const rec = normalize({ ...input, court_pref: courtPref });
   validate(rec);
   // Compute the first target slot. The pattern is "next <day> at <time>".
   // The very next occurrence is always 0-7 days away, so it's always inside
@@ -79,21 +90,74 @@ function add(input) {
   const action = 'book_now';
   // Fire immediately; the chain will set next_fire_at to first_occurrence + 7d after.
   const nextFireAt = new Date(firstOccurrenceUtc).toISOString();
-  const created = repo.recurring.create({ ...rec, first_occurrence_action: action, next_fire_at: nextFireAt });
-  log.info('recurring.add', { id: created.id, action, firstOccurrenceUtc, label: created.label, fallback_enabled: !!rec.fallback_enabled });
-  return present(created);
+  const createFields = { ...rec, first_occurrence_action: action, next_fire_at: nextFireAt };
+  const created = repo.recurring.create(createFields);
+  if (alloc.no_courts_available) {
+    // Set the error fields via setLastResult (the canonical way to mark a
+    // recurring row with a fire-time result).
+    repo.recurring.setLastResult(created.id, {
+      status: 'failed',
+      msg: 'No courts available at this time slot — all 3 courts are taken by other recurring bookings.',
+      category: 'no_courts_available',
+    });
+  }
+  log.info('recurring.add', {
+    id: created.id, action, firstOccurrenceUtc, label: created.label,
+    fallback_enabled: !!rec.fallback_enabled,
+    court_auto_allocated: alloc.auto_allocated || false,
+    original_court: alloc.original_court || null,
+    no_courts_available: alloc.no_courts_available || false,
+  });
+  const presented = present(repo.recurring.get(created.id));
+  if (alloc.auto_allocated) {
+    presented.court_auto_allocated = true;
+    presented.original_court_pref = alloc.original_court;
+  }
+  if (alloc.no_courts_available) {
+    presented.no_courts_available = true;
+  }
+  return presented;
 }
 
 function update(id, fields) {
   const cur = repo.recurring.get(id);
   if (!cur) throw new Error('not found');
-  const merged = normalize({
-    ...cur,
-    ...fields,
+  const merged = { ...cur, ...fields };
+  // Re-run court auto-allocation if any slot-defining field changes
+  const slotChanged = fields.day_of_week !== undefined || fields.time !== undefined || fields.court_pref !== undefined;
+  if (slotChanged) {
+    const alloc = courtAllocator.resolveForRecurring({
+      dayOfWeek: merged.day_of_week,
+      time: merged.time,
+      courtPref: merged.court_pref,
+      excludeId: id,
+    });
+    if (alloc.no_courts_available) {
+      // Keep the prior court_pref to preserve user intent; mark failed.
+      merged.court_pref = cur.court_pref;
+    } else {
+      merged.court_pref = alloc.court;
+    }
+  }
+  const normalized = normalize({
+    ...merged,
     courts: fields.courts || (typeof fields.fallback_enabled === 'boolean' ? undefined : JSON.parse(cur.courts || '[]')),
   });
-  validate(merged);
-  const updated = repo.recurring.update(id, merged);
+  validate(normalized);
+  const updated = repo.recurring.update(id, normalized);
+  if (slotChanged) {
+    // Mark the no_courts_available state (or clear it if the slot is now clear).
+    if (courtAllocator.findConflictingCourts({ dayOfWeek: updated.day_of_week, time: updated.time, excludeId: id }).length >= 3) {
+      repo.recurring.setLastResult(id, {
+        status: 'failed',
+        msg: 'No courts available at this time slot — all 3 courts are taken by other recurring bookings.',
+        category: 'no_courts_available',
+      });
+    } else if (cur.last_error_category === 'no_courts_available') {
+      // Slot is now clear — clear the error so it doesn't keep showing.
+      repo.recurring.setLastResult(id, { status: null, msg: null, category: null });
+    }
+  }
   // Re-anchor to the next occurrence if the schedule changed OR the courts changed
   if (fields.day_of_week !== undefined || fields.time !== undefined || fields.court_pref !== undefined || fields.courts !== undefined || fields.fallback_enabled !== undefined) {
     const firstOccurrenceUtc = time.nextWeekdayAt(updated.day_of_week, updated.time, { after: Date.now() });

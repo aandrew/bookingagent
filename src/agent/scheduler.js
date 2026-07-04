@@ -5,19 +5,20 @@ const time = require('./time');
 const state = require('./state');
 const warmup = require('./warmup');
 const fire = require('./fire');
+const pool = require('./pool');
 const recurring = require('./recurring');
 const log = require('../logger');
 const config = require('../config');
 const { KoorooClient } = require('../kooroo/client');
 const { timeToSlot, slotToTime } = require('../kooroo/client');
 
-const timers = new Map(); // recurringId -> { warmTimer, fireTimer }
+const timers = new Map(); // recurringId -> { sessionCheckTimer, warmTimer, fireTimer }
 const SESSION_LEAD_MS = 7 * 24 * 3600_000;  // 7 days
 
 function clearTimers(id) {
   const t = timers.get(id);
   if (!t) return;
-  for (const k of ['warmTimer', 'fireTimer']) {
+  for (const k of ['sessionCheckTimer', 'warmTimer', 'fireTimer']) {
     if (t[k]) clearTimeout(t[k]);
   }
   timers.delete(id);
@@ -122,6 +123,17 @@ function schedule(recurringId) {
     timers.set(recurringId, { fireTimer });
     return;
   }
+  // v3.1: per-recurring session-check timer. Probes the account session a
+  // configurable offset BEFORE the existing warmup, so a Playwright re-login
+  // (if needed) has time to complete. This replaces the legacy */10 cron
+  // that polled every account 24/7.
+  const sessionCheckOffsetMs = config.sessionCheckOffsetMinutes * 60_000;
+  const sessionCheckDelta = Math.max(1000, delta - leadMs - sessionCheckOffsetMs);
+  const sessionCheckTimer = setTimeout(() => {
+    pool.probeOne(rec.account_id)
+      .then(r => log.info('scheduler.sessionCheck.done', { recurring: recurringId, account: rec.account_id, ok: r.ok, reloggedIn: r.reloggedIn || false, error: r.reloginError || null }))
+      .catch(e => log.error('scheduler.sessionCheck.error', { recurring: recurringId, error: e.message }));
+  }, sessionCheckDelta);
   const warmDelta = Math.max(1000, delta - leadMs);
   const warmTimer = setTimeout(() => {
     const fireMs = nextUtc;
@@ -134,7 +146,7 @@ function schedule(recurringId) {
   const fireTimer = setTimeout(() => {
     executeScheduledBooking(rec, nextUtc).catch(e => log.error('scheduler.fire.error', { recurring: recurringId, error: e.message }));
   }, delta);
-  timers.set(recurringId, { warmTimer, fireTimer });
+  timers.set(recurringId, { sessionCheckTimer, warmTimer, fireTimer });
 }
 
 function rescanAll() {
@@ -181,7 +193,7 @@ function stop() {
 
 function listActive() {
   const out = [];
-  for (const [id, t] of timers) out.push({ recurring_id: id, hasWarmTimer: !!t.warmTimer, hasFireTimer: !!t.fireTimer });
+  for (const [id, t] of timers) out.push({ recurring_id: id, hasSessionCheckTimer: !!t.sessionCheckTimer, hasWarmTimer: !!t.warmTimer, hasFireTimer: !!t.fireTimer });
   return out;
 }
 

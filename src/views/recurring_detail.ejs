@@ -1,6 +1,8 @@
 <%- include('partials/header', { title: 'Recurring #' + recurring.id }) %>
 <div class="panel">
-  <h2><%= recurring.label %></h2>
+  <h2><%= recurring.label %>
+    <% if (recurring.last_error_category === 'no_courts_available') { %><span class="pill err" style="margin-left: 8px;">no courts available</span><% } %>
+  </h2>
   <p class="muted">Account: <%= account ? account.label + ' (' + account.username + ')' : '#' + recurring.account_id %> — State: <%= account?.state || '—' %></p>
   <p>Pattern: Court <%= recurring.court_pref %> on <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][recurring.day_of_week] %> at <%= recurring.time %> Sydney, <%= recurring.duration_mins %>m duration</p>
   <p>Next attempt: <span class="countdown" data-fire-at="<%= new Date(recurring.next_fire_at).getTime() %>">…</span> (<%= recurring.next_fire_at %> Sydney = <%= format.formatSydneyDateTime(recurring.next_fire_at) %>)</p>

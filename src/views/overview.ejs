@@ -27,18 +27,20 @@
   <div class="panel">
     <h2>Upcoming bookings (next 6)</h2>
     <table>
-      <thead><tr><th>Label</th><th>Account</th><th>Pattern</th><th>Next attempt</th><th>Action</th></tr></thead>
+      <thead><tr><th>Label</th><th>Account</th><th>Info</th><th>Next attempt</th><th>Action</th></tr></thead>
       <tbody>
       <% upcoming.forEach(function(r) { %>
         <tr>
-          <td><a href="/recurring/<%= r.id %>"><%= r.label %></a></td>
+          <td><a href="/bookings"><%= r.label %></a>
+            <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
+          </td>
           <td><%= acctCell(r) %></td>
           <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
           <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
           <td><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
         </tr>
       <% }) %>
-      <% if (!upcoming.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/recurring">Recurring</a>.</td></tr><% } %>
+      <% if (!upcoming.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/make-booking">Make Booking</a>.</td></tr><% } %>
       </tbody>
     </table>
     <% if (totalPages > 1) { %>

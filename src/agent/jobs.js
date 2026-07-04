@@ -7,25 +7,14 @@ const pool = require('./pool');
 const repo = require('../db/repo');
 const scheduler = require('./scheduler');
 
-let probeTask;
 let auditTask;
 let backupTask;
 
 function start() {
   // Sub-second scheduler for recurring bookings
   scheduler.start();
-  // Session probe every 10 min (re-login if needed)
-  if (!probeTask) {
-    probeTask = cron.schedule(config.sessionProbeCron, async () => {
-      try {
-        const r = await pool.probeAll();
-        log.info('cron.probe', { count: r.length });
-      } catch (e) {
-        log.error('cron.probe.error', { error: e.message });
-      }
-    });
-    log.info('cron.probe.started', { expr: config.sessionProbeCron });
-  }
+  // v3.1: session probes are now per-recurring (see scheduler.sessionCheckTimer).
+  // The legacy 10-min cron is removed; rescan still walks accounts on boot.
   // Daily audit prune at 03:00
   if (!auditTask) {
     auditTask = cron.schedule('0 3 * * *', () => {
@@ -60,10 +49,10 @@ function start() {
 
 function stop() {
   scheduler.stop();
-  for (const t of [probeTask, auditTask, backupTask]) {
+  for (const t of [auditTask, backupTask]) {
     try { t?.stop?.(); } catch {}
   }
-  probeTask = auditTask = backupTask = undefined;
+  auditTask = backupTask = undefined;
   pool.shutdown();
 }
 

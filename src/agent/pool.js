@@ -55,31 +55,38 @@ async function withClient(accountId, fn) {
   }
 }
 
+async function probeOne(accountId) {
+  const account = repo.accounts.get(accountId);
+  if (!account) return { id: accountId, ok: false, error: 'not_found' };
+  if (!account.enabled) return { id: accountId, username: account.username, enabled: false };
+  try {
+    const c = await clientFor(account.id);
+    const probe = await probeSession(c);
+    repo.accounts.touchCheck(account.id);
+    const out = { id: account.id, username: account.username, ok: probe.ok, status: probe.status, reason: probe.reason || probe.error || null };
+    if (!probe.ok) {
+      try {
+        await reloginWithBrowser(account);
+        forget(account.id);
+        out.reloggedIn = true;
+      } catch (e) {
+        out.reloginError = e.message;
+      }
+    }
+    return out;
+  } catch (e) {
+    return { id: account.id, username: account.username, ok: false, error: e.message };
+  }
+}
+
 async function probeAll() {
   const out = [];
   for (const account of repo.accounts.list()) {
-    if (!account.enabled) { out.push({ id: account.id, username: account.username, enabled: false }); continue; }
-    try {
-      const c = await clientFor(account.id);
-      const probe = await probeSession(c);
-      out.push({ id: account.id, username: account.username, ok: probe.ok, status: probe.status, reason: probe.reason || probe.error || null });
-      repo.accounts.touchCheck(account.id);
-      if (!probe.ok) {
-        try {
-          await reloginWithBrowser(account);
-          forget(account.id);
-          out[out.length - 1].reloggedIn = true;
-        } catch (e) {
-          out[out.length - 1].reloginError = e.message;
-        }
-      }
-    } catch (e) {
-      out.push({ id: account.id, username: account.username, ok: false, error: e.message });
-    }
+    out.push(await probeOne(account.id));
   }
   return out;
 }
 
 function shutdown() { clients.clear(); }
 
-module.exports = { clientFor, ensureSession, withClient, probeAll, forget, shutdown };
+module.exports = { clientFor, ensureSession, withClient, probeOne, probeAll, forget, shutdown };
