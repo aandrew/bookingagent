@@ -1,10 +1,21 @@
 # Architecture — Kooroora Booking Agent
 
-> **Version:** 3.0 · **Last updated:** 2026-07-03
+> **Version:** 3.5 · **Last updated:** 2026-07-04
 > **Stack:** Node.js 20, Express, better-sqlite3 (WAL), undici, Playwright, node-cron, EJS, Caddy 2 + caddy-dns/cloudflare, Docker
 > **Live deployment:** https://bookings.boomercheugys.com
 
-This document describes how the system is wired together so a future session (or another engineer) can pick it up. It complements the user-facing `README.md` (how to use the dashboard) and the operator-facing `DEPLOY.md` (how to run the server). The goal here is to explain **how it works under the hood** and **why each piece is the way it is**.
+This document describes how the system is wired together so a future session (or another engineer) can pick it up. It complements the user-facing `README.md` (how to use the dashboard), the operator-facing `DEPLOY.md` (how to run the server), and the dedicated design doc for the time-based booking logic at [`docs/recurring-bookings.md`](docs/recurring-bookings.md). The goal here is to explain **how it works under the hood** and **why each piece is the way it is**.
+
+## v3 → v3.5 changelog (the big picture)
+
+- **v3.1 — Court auto-allocation**: when the user picks "any court" the system picks the first non-conflicting court automatically. See `src/agent/courtAllocator.js`.
+- **v3.2 — Unified Make Booking form**: removed Strategy, Lead days, Time end fields. Added AM/PM widget, single date picker, auto-generated label. Tooltips + field validation.
+- **v3.2 — Account form spinner**: the Add & test login form shows a CSS spinner and status text while Playwright runs (15-30s). Friendly error explanations.
+- **v3.3 — Auto-attempt for one-off bookings**: `POST /api/watches` now attempts the booking immediately if the date is within 7 days. Returns `{ watch, attempt }` so the form can show what happened.
+- **v3.4 — Every booking is a weekly schedule**: removed the "recurring" toggle. The picked date is the schedule anchor. First fire is at the opening (T-7d). Fixed the chain (was using `slotUtc + 7d` which fired at the closing moment of the next slot). Fixed `slotForFire` to honour `first_slot_date` for the first fire and `fireMs + 7d` for subsequent. New `recurring_bookings.first_slot_date` column.
+- **v3.4 — Self-healing Docker**: `tools/deploy.sh` chowns the host data dir if the container's uid doesn't match; `docker-entrypoint.sh` chowns on every container start.
+- **v3.5 — Booking target on /recurring/:id**: shows what slot the next fire will book, not just when it'll fire.
+- **v3.5 — Restored non-recurring bookings**: re-added the "Make this a recurring weekly booking" toggle. When OFF, the form posts to `/api/watches` (one-shot); when ON, it posts to `/api/recurring` (weekly). New `watches.fired_at` column + `fire-due-watches` cron (every 1 min) for one-shot watches > 7 days out.
 
 ---
 
@@ -49,16 +60,17 @@ src/
     booking.js              create / cancel
     endpoints.json          Discovered API contract (frozen)
   agent/
-    pool.js                 Per-account client pool (legacy v1 path)
+    pool.js                 Per-account client pool
     state.js                Account state machine
     time.js                 Sydney-time helpers (DST-aware)
     warmup.js               Token pre-warm + prebuilt request body
     fire.js                 fireOne / fireImmediate / fireCourts / categorize
-    monitor.js              Legacy one-shot watch loop (v1)
-    booker.js               Manual book / cancel (one-off bookings)
-    recurring.js            v2/v3 — CRUD + chain + first-immediate + auto-label
-    scheduler.js            v2.1 — sub-second timer arm, prime, missed-fire recovery
-    jobs.js                 Cron startup (probe / audit-prune / backup marker)
+    monitor.js              One-shot watches: runWatch, fireDueWatches, isWithinBookingWindow
+    booker.js               Manual book / cancel
+    recurring.js            v2/v3 — CRUD + chain + first-immediate + auto-label + first_slot_date
+    scheduler.js            Per-recurring timer arm, prime, missed-fire recovery, slotForFire, nextBookingTarget
+    jobs.js                 Crons: fire-due-watches (every 1 min), audit.prune (daily), backup.marker (daily)
+    courtAllocator.js       v3.1 — auto-allocate "any" court to first non-conflicting slot
   routes/
     auth.js                 /login, /logout
     dashboard.js            /, /accounts, /watches, /bookings, /recurring, /booking-log, /fire-events, /audit, /settings
@@ -103,23 +115,33 @@ sessions(id, account_id UNIQUE, cookies_json, bearer_token, csrf_token,
   -- user_json is { user_id, contact_id, max_hours_per_booking }
 
 watches(id, account_id, label, court, date_from, date_to, time_start, time_end,
-       duration_mins, strategy, lead_days, enabled, last_run_at, last_status, last_msg,
-       created_at, updated_at)
-  -- legacy v1 one-shot watches; still functional but superseded by recurring_bookings
+        duration_mins, strategy, lead_days, enabled,
+        fired_at,  -- v3.5: set after the first fire (success OR fail) so the
+                   -- fire-due-watches cron doesn't re-attempt it. NULL = not yet
+                   -- fired. A non-recurring booking is one-shot.
+        last_run_at, last_status, last_msg,
+        created_at, updated_at)
+  -- one-shot watches: the Make Booking form's "non-recurring" path posts here
+  -- when the recurring toggle is off. The API auto-attempts if the date is
+  -- within 7 days; otherwise it sits in the DB until the fire-due-watches cron
+  -- picks it up.
 
 bookings(id, account_id, watch_id NULL, recurring_id NULL, court, date, start_time,
-         end_time, status, external_id, raw_json, created_at)
+          end_time, status, external_id, raw_json, created_at)
   -- status: confirmed | cancelled | failed
   -- external_id: the booking ID returned by kooroora.asn.au (matched later for cancel)
 
 recurring_bookings(id, account_id, label, court_pref, courts, day_of_week, time,
-                   duration_mins, lead_minutes, enabled,
-                   next_fire_at, last_fire_at, last_status, last_msg,
-                   last_error_category, error_dismissed_at, first_occurrence_action,
-                   created_at, updated_at)
+                    duration_mins, lead_minutes, enabled,
+                    next_fire_at, last_fire_at, last_status, last_msg,
+                    last_error_category, error_dismissed_at, first_occurrence_action,
+                    first_slot_date,  -- v3.4: the date the user picked — the
+                                       -- schedule anchor. First fire = this - 7d.
+                                       -- Chain = previous slot's time.
+                    created_at, updated_at)
   -- courts: JSON array, always starts with court_pref
   -- first_occurrence_action: book_now | schedule | resolved
-  -- last_error_category: no_time_available | technical_error | auth_required
+  -- last_error_category: no_time_available | technical_error | auth_required | no_courts_available
 
 fire_events(id, recurring_id NULL, account_id NULL,
             scheduled_at, fired_at NULL,
@@ -286,10 +308,40 @@ So by T+0, the agent has a fresh session and a pre-built request — no string-c
 
 After a fire (success or failure), `recurring.chainToNextWeek(id)`:
 1. Find the most recent `fire_event` with a `date` + `time` for this recurring
-2. Compute that slot's UTC time + 7 days = next fire time
+2. Compute that slot's UTC time = next fire time (v3.4: NOT + 7 days)
 3. Write it to `next_fire_at`
 
 The intuition: "I just attempted to book slot T. The next slot I want to book is T+7d. The release window for T+7d opens at T. So my next fire should be at T." This is exact because the chain uses the actual slot time of the previous attempt, not a computation from "now".
+
+**Why not `slotUtc + 7d`?** The earlier v3 chain was `slotUtc + 7d`, which set the next fire to the **closing** moment of the next slot (too late). For a 15 Jul 19:00 slot booked at 8 Jul 19:00, the old chain would set the next fire to 15 Jul 19:00 — which is the closing of the 15 Jul slot, not the opening of the 22 Jul slot. The fire at 15 Jul 19:00 would then try to book 15 Jul 19:00 again. The v3.4 fix uses just `slotUtc` (the opening of the next slot).
+
+### `slotForFire` — what slot does a given fire attempt to book?
+
+`src/agent/scheduler.js`:
+```js
+function slotForFire(rec, fireMs) {
+  if (!rec.last_fire_at && rec.first_slot_date) {
+    // First fire: the user-picked slot date.
+    return { date: rec.first_slot_date, from, to };
+  }
+  // Subsequent fires: the next slot is 7 days after the fire time.
+  return { date: sydneyDateString(fireMs + 7 * 86_400_000), from, to };
+}
+```
+
+The `last_fire_at` is set after the first fire (by `setLastResult`), so the same `slotForFire` correctly handles both cases. The `from` and `to` are the 30-min slot range derived from `rec.time` (e.g. 19:00 → 38, 20:00 → 40).
+
+### `nextBookingTarget` — what the next fire will book
+
+For the recurring detail page (`/recurring/:id`):
+```js
+function nextBookingTarget(rec) {
+  if (!rec.next_fire_at) return null;
+  return slotForFire(rec, new Date(rec.next_fire_at).getTime());
+}
+```
+
+The route handler pre-formats the target so the view doesn't need to call `slotToTime` (EJS in production doesn't expose `require`). The view shows e.g. "Next attempt: 8 Jul 7:00 PM AEST" → "Booking target: Wed 7pm (2026-07-15 19:00)".
 
 ### Missed fires (boot recovery)
 
@@ -361,29 +413,77 @@ executeScheduledBooking(rec, fireMs):
     ├─ state.transition(accountId, BOOKED or FAILED or SESSION_EXPIRED)
     └─ recurring.setLastResult(id, {status, msg, category})
   
-  recurring.chainToNextWeek(rec.id)            # 4. chain
-    └─ find latest fire_event, set next_fire_at = slot + 7d
-  
-  repo.recurring.update(id, {first_occurrence_action: 'resolved'})
-  schedule(rec.id)                              # 5. re-arm
+   recurring.chainToNextWeek(rec.id)            # 4. chain
+     └─ find latest fire_event, set next_fire_at = slotUtc  (v3.4: NOT + 7d)
+   
+   repo.recurring.update(id, {first_occurrence_action: 'resolved'})
+   schedule(rec.id)                              # 5. re-arm
 ```
 
 Total budget in the optimistic case: 5s warmup at T-5min + ≤10ms drift-corrected wait + ~200ms first POST. Worst case: 5s warmup + drift + 600ms first POST (timeout) + 600ms second + 600ms third = ~2.4s total.
 
 ---
 
-## 9. First-occurrence: why it's always `book_now`
+## 9. First-occurrence: how `next_fire_at` is computed
 
-When the user creates a recurring "Wed 7pm Court 5":
-- `nextWeekdayAt(3, '19:00', { after: now })` returns the next Wed 7pm Sydney, which is always 0–7 days from now (and always > 0 by construction).
-- The release time for that slot is 7 days before, which is `now - (0 to 7 days)`, i.e. always in the past.
-- So `release_time <= now` is always true, which makes the action `book_now`.
+For a new recurring with `first_slot_date="2026-07-15"`, `time="19:00"`:
 
-The "schedule" path is only meaningful for second-and-later fires (via `chainToNextWeek`), where the target slot is 7 days in the future from the previous fire. Those land in the scheduler with their `next_fire_at` set to the exact target time, and the `isImmediate` check is false.
+```js
+// src/agent/recurring.js: add()
+let firstFireUtc = sydneyWallToUtc(first_slot_date, time) - 7 * 86_400_000;  // opening
+if (firstFireUtc <= Date.now()) {
+  firstFireUtc = sydneyWallToUtc(first_slot_date, time);                       // closing
+}
+```
+
+- **Picked date > 7 days out**: `firstFireUtc = picked_date - 7d` (the opening). The fire happens then.
+- **Picked date within 7 days**: the opening is in the past, so we fall back to the picked date itself (the closing). The slot can still be booked up to its start time, and the Koorora API will accept or reject.
+
+For a new recurring WITHOUT `first_slot_date` (legacy path), the first fire is `nextWeekdayAt(day_of_week, time, { after: now })` — the next occurrence of that weekday+time, which is always 0-7 days away. This is the v2.1 behavior.
+
+The "schedule" path is only meaningful for second-and-later fires (via `chainToNextWeek`), where the target slot is 7 days in the future from the previous fire.
 
 ---
 
-## 10. Authentication & sessions
+## 10. Non-recurring (one-shot) watches
+
+The Make Booking form's "Make this a recurring weekly booking" toggle, when OFF, posts to `/api/watches`. The API auto-detects:
+
+```js
+const target = new Date(date_from + 'T00:00:00');
+const diffDays = (target - today) / 86_400_000;
+const strategy = diffDays <= 7 ? 'watch' : 'scheduled';
+```
+
+- **Within 7 days**: create the watch AND immediately call `monitor.runWatch` to attempt the booking. Return the attempt result in the response.
+- **> 7 days**: create the watch with `strategy='scheduled'`. The new `fire-due-watches` cron (every 1 minute) picks it up.
+
+### `fire-due-watches` cron (`src/agent/jobs.js`)
+
+```
+Every minute:
+  for each enabled watch with fired_at IS NULL:
+    if isWithinBookingWindow(date_from):
+      runWatch(watch)             # attempts the booking
+      setFired(watch)            # marks fired_at = now()
+```
+
+The `fired_at` column is the one-shot guarantee. After firing (success OR fail), `monitor.runWatch` sets `watches.fired_at`. The cron filters `fired_at IS NULL`, so a fired watch is never re-attempted.
+
+The user must create a new watch to retry a failed attempt.
+
+### Why a separate path from recurring
+
+Watches are a one-shot, while recurrings are a weekly schedule. Watches:
+- Don't chain (no next-week timer)
+- Don't have a `day_of_week` (they have a specific `date_from`)
+- Don't have `first_slot_date` (they have the date itself)
+
+The legacy `monitor.js` is the watches path. The `scheduler.js` is the recurring path. Both call into `fire.js` to actually attempt the booking.
+
+---
+
+## 11. Authentication & sessions
 
 ### Admin (dashboard) session
 - `express-session` with `MemoryStore` (fine for single-user; the warning in startup logs is acknowledged)
@@ -405,7 +505,7 @@ The "schedule" path is only meaningful for second-and-later fires (via `chainToN
 
 ---
 
-## 11. Data tier (v3)
+## 12. Data tier (v3)
 
 Three pieces, with different lifecycles:
 
@@ -488,23 +588,24 @@ To roll back: `tools/restore.sh` (or pick a specific file).
 
 ---
 
-## 12. Cron jobs (`src/agent/jobs.js`)
+## 13. Cron jobs (`src/agent/jobs.js`)
 
 Three in-container cron tasks. None of them are user-facing; they're for housekeeping.
 
 | Cron | What |
 |---|---|
-| `*/10 * * * *` (`SESSION_PROBE_CRON`) | `pool.probeAll()` — checks every account's session, re-logs in if expired |
+| `*/1 * * * *` (`fire-due-watches`) | `monitor.fireDueWatches()` — picks up non-recurring watches whose `date_from` is now within the 7-day Koorora window and fires them. Skips watches with `fired_at IS NOT NULL` so non-recurring bookings are one-shot. |
+| `*/10 * * * *` (`SESSION_PROBE_CRON`, legacy — v3.5 removed) | `pool.probeAll()` — checks every account's session. The v3.5 model uses per-recurring session checks in the scheduler instead. |
 | `0 3 * * *` | `repo.audit.prune(30)` — drop `audit_log` rows older than 30 days |
 | `30 2 * * *` (`BACKUP_CRON`) | Touches `/app/backups/.last-run` (the actual backup file is written by the host-side `tools/backup.sh`, which should also be in a host cron) |
 
 The backup marker is a small JSON file with `ran_at` + `host`. The dashboard can read it to show "last backup ran X minutes ago", but currently we don't surface it in the UI — it's there for the operator.
 
-The session-probe cron is what keeps long-lived recurring bookings from failing when the WordPress session quietly expires.
+The per-recurring session check is what keeps long-lived recurring bookings from failing when the WordPress session quietly expires. v3.5 removed the 24/7 cron (`SESSION_PROBE_CRON`) in favour of "probe only when needed, only for the accounts that have an upcoming fire" — much less network traffic.
 
 ---
 
-## 13. API surface
+## 14. API surface
 
 All endpoints require an admin session (except `/healthz` and `/login`).
 
@@ -519,12 +620,18 @@ All endpoints require an admin session (except `/healthz` and `/login`).
 
 ### Recurring
 - `GET /api/recurring?enabled=true|false` — list (optionally filtered)
-- `POST /api/recurring` — add (label is auto-generated; `fallback_enabled` is a boolean)
+- `POST /api/recurring` — add (label is auto-generated; `fallback_enabled` is a boolean). v3.4+: accepts `first_slot_date` (YYYY-MM-DD) to anchor the weekly schedule. Court is auto-allocated when `court_pref` is null/empty/`"any"`.
 - `PATCH /api/recurring/:id` — update
 - `DELETE /api/recurring/:id`
 - `POST /api/recurring/:id/book-now` (alias: `fire-now`) — manual trigger
 - `POST /api/recurring/:id/dismiss-error` — hide the error banner for this recurring
 - `GET /api/recurring/:id/attempts` (alias: `fire-events`) — full history
+
+### Watches (non-recurring, one-shot)
+- `GET /api/watches` — list (including `fired_at`)
+- `POST /api/watches` — add. v3.5: auto-detects strategy based on `date_from` (within 7 days = immediate attempt, > 7 days = scheduled). The response includes `{ watch, attempt }` so the form can show what happened.
+- `DELETE /api/watches/:id`
+- `POST /api/monitor/run` — run all enabled non-fired watches now (useful for testing)
 
 ### Booking log (audit of attempts)
 - `GET /api/booking-log?status=...&recurring_id=...&account_id=...&limit=...` (alias: `/api/fire-events`)
@@ -537,15 +644,12 @@ All endpoints require an admin session (except `/healthz` and `/login`).
 - `GET /api/audit?account_id=...&limit=...` — raw outbound HTTP log
 
 ### Legacy (v1, still functional)
-- `GET/POST /api/watches` — one-shot watches
-- `POST /api/watches/:id/book-now`
-- `POST /api/monitor/run` — run all enabled watches
 - `GET/POST /api/bookings` — manual bookings (the "Bookings" page)
 - `POST /api/bookings/:id/cancel`
 
 ---
 
-## 14. UI layer
+## 15. UI layer
 
 `src/views/` is plain EJS. No build step. The CSS is a single block in `partials/header.ejs` (dark theme, ~200 lines).
 
@@ -568,7 +672,7 @@ All `ts` and `scheduled_at` / `fired_at` columns are rendered via `format.format
 
 ---
 
-## 15. Configuration (env vars)
+## 16. Configuration (env vars)
 
 | Var | Default | Used in |
 |---|---|---|
@@ -592,7 +696,7 @@ All `ts` and `scheduled_at` / `fired_at` columns are rendered via `format.format
 
 ---
 
-## 16. Failure modes & mitigations
+## 17. Failure modes & mitigations
 
 | Failure | Detection | Mitigation |
 |---|---|---|
@@ -614,7 +718,7 @@ All `ts` and `scheduled_at` / `fired_at` columns are rendered via `format.format
 
 ---
 
-## 17. What's deliberately NOT in v3
+## 18. What's deliberately NOT in v3
 
 Documented here so a future session doesn't accidentally re-implement them.
 
@@ -628,23 +732,27 @@ Documented here so a future session doesn't accidentally re-implement them.
 
 ---
 
-## 18. Where to start when picking this up
+## 19. Where to start when picking this up
 
 1. **Read `README.md`** for the user-facing view.
-2. **Read `DEPLOY.md`** for the operator view.
-3. **Read `src/server.js`** — the entry point, ~80 lines, mounts routes and starts jobs.
-4. **Read `src/agent/recurring.js`** — the recurring CRUD + chain logic, ~150 lines.
-5. **Read `src/agent/scheduler.js`** — the in-process timer pool, ~190 lines.
-6. **Read `src/agent/fire.js`** — the actual POST + categorise, ~240 lines.
-7. **Read `src/kooroo/client.js`** — the undici + tough-cookie client, ~170 lines.
-8. **Read `src/db/repo.js`** — the data layer, ~290 lines.
-9. **Read `tools/backup.sh`** — the data-tier durability story in 100 lines of bash.
+2. **Read `docs/recurring-bookings.md`** for the dedicated design doc on the time-based booking logic (scenarios, edge cases, the math). If you're touching the recurring or watches flow, START HERE.
+3. **Read `DEPLOY.md`** for the operator view.
+4. **Read `src/server.js`** — the entry point, ~80 lines, mounts routes and starts jobs.
+5. **Read `src/agent/recurring.js`** — the recurring CRUD + chain logic, ~230 lines. This is the heart of the time math.
+6. **Read `src/agent/scheduler.js`** — the in-process timer pool, ~190 lines. Owns `slotForFire` and `nextBookingTarget`.
+7. **Read `src/agent/fire.js`** — the actual POST + categorise, ~240 lines.
+8. **Read `src/agent/monitor.js`** — the watches path (`runWatch`, `fireDueWatches`), ~150 lines.
+9. **Read `src/agent/courtAllocator.js`** — the court auto-allocation, ~50 lines.
+10. **Read `src/kooroo/client.js`** — the undici + tough-cookie client, ~170 lines.
+11. **Read `src/db/repo.js`** — the data layer, ~300 lines.
+12. **Read `tools/backup.sh`** — the data-tier durability story in 100 lines of bash.
 
 For a feature change:
 - New endpoint → edit `src/routes/api.js`, then add the view in `src/views/`
 - New cron job → edit `src/agent/jobs.js`
 - New scheduler behaviour → edit `src/agent/scheduler.js` and possibly `recurring.js`
-- New kooroora API → edit `src/kooroo/endpoints.json` (or regenerate via `tools/spike-login.js` + `tools/extract-endpoints.js`)
+- New kooroora API → edit `src/kooroo/endpoints.json` (or regenerate via `tools/spike-login.js` + `tools/extract-endpoints.json`)
+- Touching the recurring time math → edit `docs/recurring-bookings.md` first to capture the design, then update the code, then update the tests in `test/smoke.test.js`.
 
 For a deployment:
 - `tools/deploy.sh` (auto-snapshots)
