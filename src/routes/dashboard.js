@@ -51,7 +51,7 @@ router.get('/bookings', requireAdmin, (req, res) => {
     r.account_label = userById[r.account_id]?.label || null;
     r.account_username = userById[r.account_id]?.username || null;
   }
-  res.render('bookings', withLocals({ bookings, accounts, recurringRows }));
+  res.render('bookings', withLocals({ bookings, accounts, recurringRows, format }));
 });
 
 router.get('/recurring', requireAdmin, (req, res) => {

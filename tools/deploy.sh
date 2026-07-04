@@ -26,6 +26,21 @@ if [ "$DO_BACKUP" = "1" ]; then
   }
 fi
 
+# Fix bind-mount permissions: the DB on the host may be owned by a different
+# uid (e.g. syslog from an older container that had no USER directive). The
+# current container runs as uid 999 (USER app in the Dockerfile), so chown
+# the data dir to match — otherwise the app fails writes with
+# "attempt to write a readonly database" (SQLITE_READONLY).
+APP_UID=999
+APP_GID=999
+if [ -d data ]; then
+  CURRENT_UID=$(stat -c '%u' data/bookingagent.sqlite 2>/dev/null || echo unknown)
+  if [ "$CURRENT_UID" != "$APP_UID" ]; then
+    echo "[deploy] data/ is owned by uid $CURRENT_UID, chowning to $APP_UID:$APP_GID to match the container's USER app..."
+    sudo chown -R "$APP_UID:$APP_GID" data/
+  fi
+fi
+
 echo "[deploy] building image..."
 sudo docker compose build app
 

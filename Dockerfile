@@ -19,16 +19,22 @@ ENV BACKUP_DIR=/app/backups
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Chromium is provided by the base image at /ms-playwright; Playwright
 # already knows how to find it via PLAYWRIGHT_BROWSERS_PATH (default).
-RUN groupadd -r app && useradd -r -g app app
+# Use a fixed uid/gid (999) for the app user so it matches the host
+# chown performed by tools/deploy.sh. This avoids the
+# "attempt to write a readonly database" error when the bind-mounted
+# DB is owned by a different host uid (e.g. the previous syslog-owned
+# state from older containers that had no USER directive).
+RUN groupadd -g 999 app && useradd -u 999 -g 999 -m app
+# Wrapper entrypoint: chowns the bind-mounted data dir as root (so the
+# app user can write it), then drops to app for the node process.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY tools ./tools
 COPY data ./data
 RUN mkdir -p /app/data /app/backups && chown -R app:app /app
-USER app
-EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/healthz || exit 1
-ENTRYPOINT ["/usr/bin/tini","--"]
+USER root
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node","src/server.js"]
