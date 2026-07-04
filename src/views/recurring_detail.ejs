@@ -9,8 +9,8 @@
   <% if (target) { %>
     <p>
       <strong>Booking target:</strong>
-      <% var dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; var d = new Date(target.date + 'T00:00:00'); %>
-      <%= dowNames[d.getDay()] %> <%= format.formatSydneyDateTime(target.date + 'T' + (recurring.time || '00:00')) %>
+      <%= target.dow %> <%= target.prettyTime %>
+      (<%= target.date %> <%= target.time %> Sydney)
       — the slot the next attempt will book.
       <% if (recurring.first_slot_date) { %>
         <span class="muted">(baseline: <%= recurring.first_slot_date %>)</span>

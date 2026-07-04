@@ -75,8 +75,24 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
   const account = repo.accounts.get(r.account_id);
   // v3.5: compute the booking target — the slot the next fire will book.
   // E.g. if the next attempt is Wed 8 Jul, the target is Wed 15 Jul.
+  // We pre-format the date/time/dow strings here so the view doesn't need
+  // to require kooroo/client (EJS in production doesn't expose require).
   const scheduler = require('../agent/scheduler');
-  const target = scheduler.nextBookingTarget(r);
+  const slotToTime = require('../kooroo/client').slotToTime;
+  const targetSlot = scheduler.nextBookingTarget(r);
+  let target = null;
+  if (targetSlot) {
+    const targetTime = slotToTime(targetSlot.from);
+    const targetDow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][
+      new Date(targetSlot.date + 'T00:00:00').getDay()
+    ];
+    target = {
+      date: targetSlot.date,
+      time: targetTime,
+      dow: targetDow,
+      prettyTime: format.formatTime12h(targetTime),
+    };
+  }
   res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account, format, query: req.query, target }));
 });
 
