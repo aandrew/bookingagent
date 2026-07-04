@@ -587,6 +587,117 @@ test('v3.4: chainToNextWeek — next fire is at the just-booked slot time (the n
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
+// ---- v3.5: booking target + non-recurring one-shot watches ----
+
+test('v3.5: scheduler.nextBookingTarget — returns the slot the next fire will book', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'v35a', username: 'v35a', password: 'p' });
+  const scheduler = require('../src/agent/scheduler');
+  // next_fire_at = 8 Jul 19:00 Sydney (the opening). The booking target
+  // is 15 Jul 19:00 (the user-picked slot, 7 days after the opening).
+  const rec = recurring.add({
+    account_id: a.id,
+    day_of_week: 3, time: '19:00', court_pref: '4',
+    duration_mins: 60, first_slot_date: '2026-07-15',
+  });
+  const target = scheduler.nextBookingTarget(rec);
+  assert.equal(target.date, '2026-07-15');
+  assert.equal(target.from, 38); // 19:00 = slot 38
+  assert.equal(target.to, 40);   // 60 min = 2 slots
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.5: scheduler.nextBookingTarget — subsequent fire targets the next slot (7d after)', () => {
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'v35b', username: 'v35b', password: 'p' });
+  const scheduler = require('../src/agent/scheduler');
+  const rec = recurring.add({
+    account_id: a.id,
+    day_of_week: 3, time: '19:00', court_pref: '4',
+    duration_mins: 60, first_slot_date: '2026-07-15',
+  });
+  // Simulate a fire at the opening that booked 15 Jul. setLastResult
+  // sets both last_status AND last_fire_at on the recurring, which
+  // signals to slotForFire that this is a subsequent fire.
+  const slotUtc = time.sydneyWallToUtc('2026-07-15', '19:00');
+  repo.fireEvents.create({
+    recurring_id: rec.id, account_id: a.id,
+    scheduled_at: new Date(slotUtc - 7 * 86_400_000).toISOString(),
+    fired_at: new Date().toISOString(),
+    status: 'booked', attempt: 1, court_attempted: '4', court_booked: '4',
+    date: '2026-07-15', time: '19:00',
+  });
+  repo.recurring.setLastResult(rec.id, { status: 'booked', msg: 'booked', category: null });
+  recurring.chainToNextWeek(rec.id);
+  const updated = repo.recurring.get(rec.id);
+  // next_fire_at = 15 Jul 19:00 (the opening of 22 Jul). Target = 22 Jul.
+  const target = scheduler.nextBookingTarget(updated);
+  assert.equal(target.date, '2026-07-22');
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+});
+
+test('v3.5: repo.watches.setFired — marks watch as fired', () => {
+  for (const w of repo.watches.list()) repo.watches.remove(w.id);
+  const a = repo.accounts.create({ label: 'v35c', username: 'v35c', password: 'p' });
+  const w = repo.watches.create({ account_id: a.id, label: 'Test', date_from: '2026-07-15', time_start: '19:00', duration_mins: 60 });
+  assert.equal(w.fired_at, null);
+  repo.watches.setFired(w.id);
+  const after = repo.watches.get(w.id);
+  assert.ok(after.fired_at, 'fired_at should be set');
+  repo.accounts.remove(a.id);
+  for (const w of repo.watches.list()) repo.watches.remove(w.id);
+});
+
+test('v3.5: monitor.fireDueWatches — only fires watches within window, skips fired ones', () => {
+  for (const w of repo.watches.list()) repo.watches.remove(w.id);
+  const monitor = require('../src/agent/monitor');
+  const a = repo.accounts.create({ label: 'v35d', username: 'v35d', password: 'p' });
+  // Watch 1: within window, not fired → should be picked up
+  const within = repo.watches.create({
+    account_id: a.id, label: 'Within', date_from: new Date().toISOString().slice(0, 10),
+    time_start: '19:00', duration_mins: 60, strategy: 'scheduled',
+  });
+  // Watch 2: within window, but already fired → should be skipped
+  const fired = repo.watches.create({
+    account_id: a.id, label: 'Fired', date_from: new Date().toISOString().slice(0, 10),
+    time_start: '19:00', duration_mins: 60, strategy: 'scheduled',
+  });
+  repo.watches.setFired(fired.id);
+  // Watch 3: out of window → should be skipped
+  const out = repo.watches.create({
+    account_id: a.id, label: 'Out', date_from: '2026-12-15',
+    time_start: '19:00', duration_mins: 60, strategy: 'scheduled',
+  });
+  // Watch 4: disabled → should be skipped
+  const disabled = repo.watches.create({
+    account_id: a.id, label: 'Disabled', date_from: new Date().toISOString().slice(0, 10),
+    time_start: '19:00', duration_mins: 60, strategy: 'scheduled', enabled: 0,
+  });
+  // The actual runWatch call will hit the Koorora API which will fail
+  // (we have no session). The important thing is that the firing path
+  // is called for "within" but NOT for "fired", "out", or "disabled".
+  // We test the selection by checking that after fireDueWatches runs,
+  // "within" has last_status set, and the others don't.
+  return monitor.fireDueWatches().then(r => {
+    // "within" should have been attempted (last_status will be 'failed'
+    // or 'error' since we have no session, but the run was attempted).
+    // "fired", "out", "disabled" should have NO new last_status.
+    const withinAfter = repo.watches.get(within.id);
+    const firedAfter = repo.watches.get(fired.id);
+    const outAfter = repo.watches.get(out.id);
+    const disabledAfter = repo.watches.get(disabled.id);
+    assert.ok(withinAfter.last_run_at, 'within should have been attempted');
+    assert.equal(firedAfter.last_run_at, null, 'fired should NOT be re-attempted');
+    assert.equal(outAfter.last_run_at, null, 'out (out of window) should NOT be attempted');
+    assert.equal(disabledAfter.last_run_at, null, 'disabled should NOT be attempted');
+  }).then(() => {
+    repo.accounts.remove(a.id);
+    for (const w of repo.watches.list()) repo.watches.remove(w.id);
+  });
+});
+
 test('v3.1: courtAllocator.findConflictingCourts — empty when no other recurring on slot', () => {
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
   const a = repo.accounts.create({ label: 'ca0', username: 'ca0', password: 'p' });

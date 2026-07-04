@@ -88,6 +88,9 @@ async function runWatch(watch) {
         raw_json: cr.body,
       });
       repo.watches.recordRun(watch.id, 'booked', `slot ${slotToTime(from)}-${slotToTime(to)}`);
+      // v3.5: non-recurring watches are one-shot — mark fired so the
+      // fire-due-watches cron doesn't keep retrying.
+      repo.watches.setFired(watch.id);
       log.info('monitor.booked', { watch: watch.id, account: account.username, courtId, from, to, date });
       return { status: 'booked', http: cr.status, body: cr.body, externalId };
     }
@@ -102,6 +105,9 @@ async function runWatch(watch) {
       raw_json: cr.body,
     });
     repo.watches.recordRun(watch.id, 'failed', `HTTP ${cr.status}`);
+    // Mark fired even on failure so the cron doesn't repeatedly retry
+    // a doomed slot. The user can create a new watch if they want to retry.
+    repo.watches.setFired(watch.id);
     return { status: 'failed', http: cr.status, body: cr.body };
   });
 }
@@ -126,4 +132,25 @@ async function bookNow(watchId) {
   return runWatch(w);
 }
 
-module.exports = { runAll, runWatch, bookNow, pickTargetDate, pickTimeWindow, isWithinBookingWindow };
+// v3.5: fire any "scheduled" watches whose date_from is now within the
+// 7-day booking window. Called by the cron in jobs.js. Skips watches
+// that have already fired (fired_at set) or that are disabled.
+async function fireDueWatches() {
+  const all = repo.watches.list();
+  const results = [];
+  for (const w of all) {
+    if (!w.enabled) continue;
+    if (w.fired_at) continue;  // already done
+    const target = pickTargetDate(w);
+    if (!isWithinBookingWindow(target)) continue;  // wait until within window
+    try { results.push({ watch: w.id, ...(await runWatch(w)) }); }
+    catch (e) {
+      log.error('monitor.fire-due.error', { watch: w.id, error: e.message });
+      repo.watches.recordRun(w.id, 'error', e.message);
+      results.push({ watch: w.id, status: 'error', error: e.message });
+    }
+  }
+  return { fired: results.length, results };
+}
+
+module.exports = { runAll, runWatch, bookNow, fireDueWatches, pickTargetDate, pickTimeWindow, isWithinBookingWindow };

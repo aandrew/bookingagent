@@ -6,6 +6,17 @@
   <p class="muted">Account: <%= account ? account.label + ' (' + account.username + ')' : '#' + recurring.account_id %> — State: <%= account?.state || '—' %></p>
   <p>Pattern: Court <%= recurring.court_pref %> on <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][recurring.day_of_week] %> at <%= recurring.time %> Sydney, <%= recurring.duration_mins %>m duration</p>
   <p>Next attempt: <span class="countdown" data-fire-at="<%= new Date(recurring.next_fire_at).getTime() %>">…</span> (<%= recurring.next_fire_at %> Sydney = <%= format.formatSydneyDateTime(recurring.next_fire_at) %>)</p>
+  <% if (target) { %>
+    <p>
+      <strong>Booking target:</strong>
+      <% var dowNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; var d = new Date(target.date + 'T00:00:00'); %>
+      <%= dowNames[d.getDay()] %> <%= format.formatSydneyDateTime(target.date + 'T' + (recurring.time || '00:00')) %>
+      — the slot the next attempt will book.
+      <% if (recurring.first_slot_date) { %>
+        <span class="muted">(baseline: <%= recurring.first_slot_date %>)</span>
+      <% } %>
+    </p>
+  <% } %>
   <p>First-occurrence action: <span class="pill"><%= recurring.first_occurrence_action === 'book_now' ? 'book now' : (recurring.first_occurrence_action || '—') %></span></p>
   <p>Fallback: <% if (recurring.courts.length > 1) { %><span class="pill">try <%= recurring.courts.join(' → ') %></span><% } else { %><span class="muted">off</span><% } %></p>
   <p>Enabled: <%= recurring.enabled ? 'yes' : 'no' %></p>

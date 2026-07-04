@@ -108,9 +108,10 @@ router.post('/watches', requireAdmin, async (req, res) => {
   if (!w.time_start) return res.status(400).json({ error: 'time_start is required (HH:MM, Sydney)' });
   if (!w.duration_mins) return res.status(400).json({ error: 'duration_mins is required' });
   // Auto-detect strategy:
-  //   - If the date is within the 7-day Kooroo booking window, use "watch" so
+  //   - If the date is within the 7-day Koorora booking window, use "watch" so
   //     monitor.js fires it as soon as possible.
-  //   - Otherwise, use "scheduled" so monitor.js targets the explicit date.
+  //   - Otherwise, use "scheduled" so the fire-due-watches cron can pick it
+  //     up at the right time.
   const target = new Date(String(w.date_from) + 'T00:00:00');
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const diffDays = Math.round((target - today) / 86_400_000);
@@ -147,7 +148,7 @@ router.post('/watches', requireAdmin, async (req, res) => {
   // Playwright if needed) and tries to book. We return both the created row
   // and the attempt outcome so the form can show what actually happened.
   // For "scheduled" (further than 7 days out) we don't attempt — the
-  // monitor loop will pick it up at the right time.
+  // fire-due-watches cron will pick it up at the right time.
   let attempt = null;
   if (created.strategy === 'watch') {
     try {
@@ -156,9 +157,16 @@ router.post('/watches', requireAdmin, async (req, res) => {
       attempt = { status: 'error', error: e.message };
     }
   } else {
-    attempt = { status: 'scheduled', reason: 'date is more than 7 days out — will be attempted automatically when the booking window opens' };
+    attempt = { status: 'scheduled', reason: 'date is more than 7 days out — fire-due-watches cron will book when the window opens' };
   }
   res.status(201).json({ watch: created, attempt });
+});
+router.patch('/watches/:id', requireAdmin, (req, res) => {
+  res.json(repo.watches.update(parseInt(req.params.id, 10), req.body || {}));
+});
+router.delete('/watches/:id', requireAdmin, (req, res) => {
+  repo.watches.remove(parseInt(req.params.id, 10));
+  res.json({ ok: true });
 });
 router.patch('/watches/:id', requireAdmin, (req, res) => {
   res.json(repo.watches.update(parseInt(req.params.id, 10), req.body || {}));

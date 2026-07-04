@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS watches (
   strategy        TEXT NOT NULL DEFAULT 'watch',
   lead_days       INTEGER NOT NULL DEFAULT 7,
   enabled         INTEGER NOT NULL DEFAULT 1,
+  -- v3.5: set when the watch has fired (success or fail). The
+  -- fire-due-watches cron skips watches with fired_at set so a
+  -- non-recurring booking doesn't get regularly rescheduled.
+  fired_at        TEXT,
   last_run_at     TEXT,
   last_status     TEXT,
   last_msg        TEXT,

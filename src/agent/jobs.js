@@ -6,15 +6,31 @@ const log = require('../logger');
 const pool = require('./pool');
 const repo = require('../db/repo');
 const scheduler = require('./scheduler');
+const monitor = require('./monitor');
 
 let auditTask;
 let backupTask;
+let dueWatchesTask;
 
 function start() {
   // Sub-second scheduler for recurring bookings
   scheduler.start();
-  // v3.1: session probes are now per-recurring (see scheduler.sessionCheckTimer).
-  // The legacy 10-min cron is removed; rescan still walks accounts on boot.
+  // v3.5: fire any due non-recurring watches every minute. A watch is
+  // "due" when its date_from is within the 7-day booking window and it
+  // hasn't already fired (fired_at is null). After firing, fired_at is
+  // set and the cron skips it, so the booking doesn't get repeatedly
+  // rescheduled.
+  if (!dueWatchesTask) {
+    dueWatchesTask = cron.schedule('*/1 * * * *', async () => {
+      try {
+        const r = await monitor.fireDueWatches();
+        if (r.fired > 0) log.info('cron.fire-due-watches', r);
+      } catch (e) {
+        log.error('cron.fire-due-watches.error', { error: e.message });
+      }
+    });
+    log.info('cron.fire-due-watches.started', {});
+  }
   // Daily audit prune at 03:00
   if (!auditTask) {
     auditTask = cron.schedule('0 3 * * *', () => {
@@ -49,10 +65,10 @@ function start() {
 
 function stop() {
   scheduler.stop();
-  for (const t of [auditTask, backupTask]) {
+  for (const t of [dueWatchesTask, auditTask, backupTask]) {
     try { t?.stop?.(); } catch {}
   }
-  auditTask = backupTask = undefined;
+  dueWatchesTask = auditTask = backupTask = undefined;
   pool.shutdown();
 }
 

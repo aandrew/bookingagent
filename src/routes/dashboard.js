@@ -73,7 +73,11 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
   const events = repo.fireEvents.list({ recurringId: r.id, limit: 50 });
   const bookings = repo.bookings.listForRecurring(r.id, 20);
   const account = repo.accounts.get(r.account_id);
-  res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account, format, query: req.query }));
+  // v3.5: compute the booking target — the slot the next fire will book.
+  // E.g. if the next attempt is Wed 8 Jul, the target is Wed 15 Jul.
+  const scheduler = require('../agent/scheduler');
+  const target = scheduler.nextBookingTarget(r);
+  res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account, format, query: req.query, target }));
 });
 
 router.get('/booking-log', requireAdmin, (req, res) => {

@@ -96,15 +96,19 @@ const watches = {
       `INSERT INTO watches (account_id, label, court, date_from, date_to, time_start, time_end, duration_mins, strategy, lead_days, enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    // Note: `0 === false` is `false` in JS (strict equality), so we have to
+    // check for both 0 and false explicitly to honour `enabled: 0` or
+    // `enabled: false`. Missing/undefined defaults to enabled (1).
+    const enabledVal = (w.enabled === false || w.enabled === 0) ? 0 : 1;
     const info = stmt.run(
       w.account_id, w.label, w.court || null, w.date_from || null, w.date_to || null,
       w.time_start || null, w.time_end || null, w.duration_mins || 60,
-      w.strategy || 'watch', w.lead_days ?? 7, w.enabled === false ? 0 : 1, nowIso(), nowIso()
+      w.strategy || 'watch', w.lead_days ?? 7, enabledVal, nowIso(), nowIso()
     );
     return watches.get(info.lastInsertRowid);
   },
   update(id, fields) {
-    const allowed = ['label','court','date_from','date_to','time_start','time_end','duration_mins','strategy','lead_days','enabled'];
+    const allowed = ['label','court','date_from','date_to','time_start','time_end','duration_mins','strategy','lead_days','enabled','fired_at'];
     const sets = []; const vals = [];
     for (const k of allowed) if (k in fields) { sets.push(`${k} = ?`); vals.push(fields[k]); }
     if (!sets.length) return watches.get(id);
@@ -119,6 +123,14 @@ const watches = {
     db.get().prepare(
       `UPDATE watches SET last_run_at = ?, last_status = ?, last_msg = ?, updated_at = ? WHERE id = ?`
     ).run(nowIso(), status, msg || null, nowIso(), id);
+  },
+  // v3.5: mark a watch as fired. The fire-due-watches cron skips watches
+  // with fired_at set, so non-recurring bookings don't get repeatedly
+  // rescheduled.
+  setFired(id, firedAt) {
+    db.get().prepare(
+      `UPDATE watches SET fired_at = ?, updated_at = ? WHERE id = ?`
+    ).run(firedAt || nowIso(), nowIso(), id);
   },
 };
 
@@ -178,10 +190,13 @@ const recurring = {
       `INSERT INTO recurring_bookings (account_id, label, court_pref, courts, day_of_week, time, duration_mins, lead_minutes, enabled, first_occurrence_action, next_fire_at, first_slot_date, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    // Honour `enabled: 0` or `enabled: false` (see watches.create for the
+    // same fix — `0 === false` is false in strict equality).
+    const enabledVal = (r.enabled === false || r.enabled === 0) ? 0 : 1;
     const info = stmt.run(
       r.account_id, r.label, r.court_pref, JSON.stringify(r.courts || [r.court_pref]),
       r.day_of_week, r.time, r.duration_mins || 60, r.lead_minutes || 10,
-      r.enabled === false ? 0 : 1,
+      enabledVal,
       r.first_occurrence_action || null, r.next_fire_at || null,
       r.first_slot_date || null,
       nowIso(), nowIso()

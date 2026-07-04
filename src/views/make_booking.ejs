@@ -17,7 +17,6 @@
 
 <div class="panel">
   <h2>Make Booking</h2>
-  <p class="muted" style="font-size: 12px; margin-top: 0;">The booking recurs every 7 days from the date you pick. The system schedules a fire 7 days before each slot (the opening moment of the 7-day booking window). For example, if you pick 15 Jul, the first fire is at 8 Jul, the second at 15 Jul, and so on.</p>
   <form id="addForm" onsubmit="return addBooking(event)">
     <div class="grid2">
       <div>
@@ -41,7 +40,7 @@
       <div>
         <label>Date</label>
         <input type="date" name="date" id="date" required>
-        <div class="help">Sydney date. The booking recurs every 7 days from this date.</div>
+        <div class="help">Sydney date. The system auto-detects: today–7 days = book now, further = schedule.</div>
       </div>
       <div>
         <label>Start time (Sydney)</label>
@@ -63,6 +62,14 @@
         <label>Duration (mins)</label>
         <input type="number" name="duration_mins" id="duration_mins" value="60" min="30" max="180" step="30" required>
         <div class="help">Length of the booking (end time = start time + duration)</div>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <label style="display:inline-block; font-size: 14px; color: var(--text); margin: 0;">
+          <input type="checkbox" id="makeRecurring" onchange="onRecurringToggle()">
+          Make this a <strong>recurring</strong> weekly booking
+        </label>
+        <div class="help">When on, the booking recurs every 7 days from the picked date. When off, it's a one-time booking.</div>
       </div>
     </div>
 
@@ -112,7 +119,7 @@
     document.querySelectorAll('.field-error').forEach(e => e.textContent = '');
   }
 
-  // Field validation
+  // Field validation (shared by both modes)
   function validate({ dateStr, timeStr, duration }) {
     if (!dateStr) return 'Date is required (use the calendar picker).';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return 'Date must be in YYYY-MM-DD format.';
@@ -128,10 +135,10 @@
   function explainError(err, path) {
     let msg = err.message || String(err);
     if (/attempt to write a readonly database/i.test(msg)) {
-      return 'The database is in read-only mode. This usually means the data directory is owned by a different user than the container. Run `tools/deploy.sh` — it has a self-healing chown step.';
+      return 'The database is in read-only mode. Run `tools/deploy.sh` — it has a self-healing chown step.';
     }
     if (/court_pref must be one of/i.test(msg)) {
-      return 'Invalid court preference. Pick a court or leave it on "any (auto-allocate)".';
+      return 'Invalid court preference.';
     }
     if (/day_of_week must be 0-6/i.test(msg)) {
       return 'Invalid day of week.';
@@ -151,13 +158,88 @@
     return msg + (path ? '  (path: ' + path + ')' : '');
   }
 
+  // v3.5: compute end time from start + duration (no more user-entered time_end)
+  function endTime(start, durMins) {
+    const [h, m] = start.split(':').map(Number);
+    const total = h * 60 + m + durMins;
+    const eh = Math.floor(total / 60) % 24;
+    const em = total % 60;
+    return String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0');
+  }
+
+  // Render a result panel for a one-off booking attempt
+  function renderWatchResult(panel, r, watch) {
+    const a = r.attempt || { status: 'unknown' };
+    let title, body, cls;
+    if (a.status === 'booked') {
+      title = '✓ Booking confirmed — label: <code>' + (watch.label || '?') + '</code>';
+      body = '<p style="margin: 4px 0;">Booked on Koorora at ' + (watch.time_start) + ' on ' + watch.date_from + '. Check <a href="/bookings">Current Bookings</a>.</p>'
+        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'ok';
+    } else if (a.status === 'scheduled') {
+      title = '⏱ Watcher scheduled — label: <code>' + (watch.label || '?') + '</code>';
+      body = '<p style="margin: 4px 0;">' + (a.reason || 'Date is more than 7 days out. The system will fire this once when the booking window opens.') + '</p>'
+        + '<p class="muted" style="font-size: 12px;">The watcher fires <strong>once</strong> and marks the booking as done — it will not be regularly rescheduled.</p>'
+        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'ok';
+    } else if (a.status === 'no-match') {
+      title = '⚠ No open slot for label <code>' + (watch.label || '?') + '</code>';
+      body = '<p style="margin: 4px 0;">Checked ' + (a.candidates ?? 0) + ' slots on ' + watch.date_from + ' — none were open at the requested time. The watcher is marked as fired (one-shot).</p>'
+        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'err';
+    } else if (a.status === 'failed') {
+      const errMsg = a.body?.message || a.error || 'unknown';
+      title = '✗ Booking failed for label <code>' + (watch.label || '?') + '</code>';
+      body = '<p style="margin: 4px 0;">Reason: <code>' + errMsg + '</code></p>'
+        + '<p class="muted" style="font-size: 12px;">The watcher is marked as fired. Create a new one if you want to retry.</p>'
+        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'err';
+    } else if (a.status === 'skipped') {
+      title = '⊘ Booking skipped for label <code>' + (watch.label || '?') + '</code>';
+      body = '<p style="margin: 4px 0;">' + (a.error || 'account disabled or missing') + '</p>'
+        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'err';
+    } else if (a.status === 'error') {
+      title = '✗ Booking error for label <code>' + (watch.label || '?') + '</code>';
+      body = '<p style="margin: 4px 0;">' + (a.error || 'unknown') + '</p>'
+        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'err';
+    } else {
+      title = '? Booking attempt returned status: ' + a.status;
+      body = '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
+      cls = 'err';
+    }
+    panel.className = 'result-panel ' + cls;
+    panel.innerHTML = '<h3>' + title + '</h3>' + body;
+  }
+
+  // Render a result panel for a recurring creation
+  function renderRecurringResult(panel, r, label) {
+    let extra = '';
+    if (r.court_auto_allocated && r.original_court_pref) {
+      extra = ' Court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + '.';
+    } else if (r.no_courts_available) {
+      extra = ' NO COURTS AVAILABLE: all 3 courts are taken by this time slot.';
+    } else if (r.first_occurrence_action === 'book_now') {
+      extra = ' First occurrence being attempted now.';
+    }
+    let cls = 'ok';
+    if (r.last_status === 'failed' && r.last_error_category === 'no_courts_available') cls = 'err';
+    panel.className = 'result-panel ' + cls;
+    panel.innerHTML = '<h3>✓ Recurring scheduled — label: <code>' + (r.label || label) + '</code></h3>'
+      + '<p class="muted" style="font-size: 12px; margin: 4px 0;">Every 7 days from the picked date. First fire at the opening (T-7d).' + extra + '</p>'
+      + '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+  }
+
   async function addBooking(e) {
     e.preventDefault();
     clearFieldErrors();
-    document.getElementById('result').style.display = 'none';
-    document.getElementById('result').className = 'result-panel';
+    const result = document.getElementById('result');
+    result.style.display = 'none';
+    result.className = 'result-panel';
 
     const f = e.target;
+    const recurringOn = !!f.makeRecurring?.checked;
     const dateStr = f.date.value;
     const time = timeTo24(f.time_hour.value, f.time_minute.value, f.time_ampm.value);
     const duration = parseInt(f.duration_mins.value, 10);
@@ -172,23 +254,42 @@
       return false;
     }
 
-    // v3.4: derive day_of_week from the picked date. The schedule is "every
-    // 7 days from this date" — the recurring model handles the rest (first
-    // fire = picked_date - 7d, chain = previous slot's time = next slot's opening).
-    // Use noon UTC to avoid timezone edge cases with the date-only string.
-    const picked = new Date(dateStr + 'T12:00:00Z');
-    const dayOfWeek = picked.getUTCDay();
+    let body, path, label, isRecurring;
 
-    const body = {
-      account_id: parseInt(f.account_id.value, 10),
-      day_of_week: dayOfWeek,
-      time: time,
-      court_pref: f.court.value || null,
-      duration_mins: duration,
-      first_slot_date: dateStr,
-    };
-    const label = buildLabel({ date: dateStr, time });
-    const path = '/api/recurring';
+    if (recurringOn) {
+      // Recurring: derive day_of_week from the picked date. The schedule is
+      // "every 7 days from this date" — first fire = picked_date - 7d,
+      // chain = previous slot's time = next slot's opening.
+      const picked = new Date(dateStr + 'T12:00:00Z');
+      const dayOfWeek = picked.getUTCDay();
+      body = {
+        account_id: parseInt(f.account_id.value, 10),
+        day_of_week: dayOfWeek,
+        time: time,
+        court_pref: f.court.value || null,
+        duration_mins: duration,
+        first_slot_date: dateStr,
+      };
+      label = buildLabel({ date: dateStr, time });
+      path = '/api/recurring';
+      isRecurring = true;
+    } else {
+      // Non-recurring: one-time booking. The server decides whether to
+      // attempt now (date ≤ 7 days) or schedule a watcher (date > 7 days).
+      const end = endTime(time, duration);
+      body = {
+        account_id: parseInt(f.account_id.value, 10),
+        date_from: dateStr,
+        date_to: dateStr,
+        time_start: time,
+        time_end: end,
+        duration_mins: duration,
+        court: f.court.value || null,
+      };
+      label = buildLabel({ date: dateStr, time });
+      path = '/api/watches';
+      isRecurring = false;
+    }
 
     const submitBtn = document.getElementById('submitBtn');
     const spinner = document.getElementById('spinner');
@@ -196,39 +297,26 @@
     submitBtn.disabled = true;
     submitBtn.classList.add('dim');
     spinner.style.display = 'inline-block';
-    status.textContent = 'Saving booking…';
+    status.textContent = recurringOn ? 'Saving recurring booking…' : 'Saving booking…';
     document.getElementById('formError').textContent = '';
 
     try {
       const r = await jsonReq(path, { method: 'POST', body: JSON.stringify(body) });
-      const result = document.getElementById('result');
-      let extra = '';
-      if (r.court_auto_allocated && r.original_court_pref) {
-        extra = ' Court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + ' (C' + r.original_court_pref + ' was already taken at this time).';
-      } else if (r.no_courts_available) {
-        extra = ' NO COURTS AVAILABLE: all 3 courts are taken by other recurring bookings.';
-      } else if (r.first_occurrence_action === 'book_now') {
-        extra = ' First occurrence is being attempted now — check the booking log for the outcome.';
-      }
-      const title = '✓ Booking scheduled — label: <code>' + (r.label || label) + '</code>';
-      const resultHtml = '<p class="muted" style="font-size: 12px; margin: 4px 0;">Every 7 days from the picked date. The first fire is scheduled 7 days before (the opening moment).' + extra + '</p>'
-        + '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
-      let cls = 'ok';
-      if (r.last_status === 'failed' && r.last_error_category === 'no_courts_available') {
-        cls = 'err';
-      }
       status.textContent = 'Saved.';
       result.style.display = 'block';
-      result.className = 'result-panel ' + cls;
-      result.innerHTML = '<h3>' + title + '</h3>' + resultHtml;
-      if (cls === 'ok') {
+      if (isRecurring) {
+        renderRecurringResult(result, r, label);
+      } else {
+        // /api/watches returns { watch, attempt }
+        renderWatchResult(result, r, r.watch);
+      }
+      if (result.className.includes('ok')) {
         setTimeout(() => { location.href = '/bookings'; }, 2000);
       }
     } catch (e) {
       const friendly = explainError(e, path);
       status.textContent = 'Failed.';
       showFieldError('formError', friendly);
-      const result = document.getElementById('result');
       result.style.display = 'block';
       result.className = 'result-panel err';
       result.innerHTML = '<h3>✗ Could not save booking</h3>'

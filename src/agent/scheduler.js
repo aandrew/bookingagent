@@ -207,7 +207,16 @@ function listActive() {
   return out;
 }
 
-module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, SESSION_LEAD_MS };
+// v3.5: returns the slot the next fire of `rec` will attempt to book.
+// Used by the recurring detail page to show "Booking target: <date> <time>".
+// Returns { date, from, to } or null if the recurring has no next_fire_at.
+function nextBookingTarget(rec) {
+  if (!rec.next_fire_at) return null;
+  const fireMs = new Date(rec.next_fire_at).getTime();
+  return slotForFire(rec, fireMs);
+}
+
+module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, nextBookingTarget, SESSION_LEAD_MS };
 // backward-compat aliases
 module.exports.executeImmediateFire = module.exports.executeImmediateBooking;
 module.exports.executeScheduledFire = module.exports.executeScheduledBooking;
