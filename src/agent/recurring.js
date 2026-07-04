@@ -81,15 +81,33 @@ function add(input) {
     : alloc.court;
   const rec = normalize({ ...input, court_pref: courtPref });
   validate(rec);
-  // Compute the first target slot. The pattern is "next <day> at <time>".
-  // The very next occurrence is always 0-7 days away, so it's always inside
-  // the 7-day booking window → action = 'book_now'. The subsequent chain
-  // (chainToNextWeek) sets the next fire to the slot we just booked (release
-  // for the next slot = this slot's time).
-  const firstOccurrenceUtc = time.nextWeekdayAt(rec.day_of_week, rec.time, { after: Date.now() });
+
+  // v3.4: compute the first fire time from the picked slot date.
+  //
+  // The schedule is "every 7 days from the picked date". The first fire is
+  // 7 days before the picked slot — i.e. the opening moment of the Koorora
+  // 7-day booking window. The chain (chainToNextWeek) then sets each
+  // subsequent fire to the just-booked slot's time (which IS the opening
+  // of the next slot, since slots are 7 days apart).
+  //
+  // If first_slot_date is provided, derive the first fire from it (this is
+  // the date the user picked on the form). Otherwise, fall back to
+  // nextWeekdayAt — the next occurrence of day_of_week+time after now.
+  let firstFireUtc;
+  if (rec.first_slot_date && /^\d{4}-\d{2}-\d{2}$/.test(rec.first_slot_date)) {
+    firstFireUtc = time.sydneyWallToUtc(rec.first_slot_date, rec.time) - 7 * 86_400_000;
+    // If the opening is in the past (the picked date is within 7 days and
+    // the opening moment has already passed), fall back to the picked
+    // date itself — i.e. the closing moment. The slot can still be
+    // booked up until the slot time.
+    if (firstFireUtc <= Date.now()) {
+      firstFireUtc = time.sydneyWallToUtc(rec.first_slot_date, rec.time);
+    }
+  } else {
+    firstFireUtc = time.nextWeekdayAt(rec.day_of_week, rec.time, { after: Date.now() });
+  }
   const action = 'book_now';
-  // Fire immediately; the chain will set next_fire_at to first_occurrence + 7d after.
-  const nextFireAt = new Date(firstOccurrenceUtc).toISOString();
+  const nextFireAt = new Date(firstFireUtc).toISOString();
   const createFields = { ...rec, first_occurrence_action: action, next_fire_at: nextFireAt };
   const created = repo.recurring.create(createFields);
   if (alloc.no_courts_available) {
@@ -102,7 +120,7 @@ function add(input) {
     });
   }
   log.info('recurring.add', {
-    id: created.id, action, firstOccurrenceUtc, label: created.label,
+    id: created.id, action, firstFireUtc, firstSlotDate: rec.first_slot_date || null, label: created.label,
     fallback_enabled: !!rec.fallback_enabled,
     court_auto_allocated: alloc.auto_allocated || false,
     original_court: alloc.original_court || null,
@@ -178,9 +196,8 @@ function get(id) {
   return present(repo.recurring.get(id));
 }
 
-// After a fire at slot T (we just booked slot T), the next slot is T+7d.
-// The release for T+7d is T. So the next fire should be AT T (= the slot
-// we just booked, which becomes available again a week later). We track the
+// v3.4 chain: after a fire that books slot T, the next fire is at T
+// (the opening of the next slot, which is 7 days after T). We track the
 // last-fired slot via the most recent fire_event so the chain survives
 // restarts and skipped fires.
 function chainToNextWeek(recurringId) {
@@ -191,9 +208,12 @@ function chainToNextWeek(recurringId) {
     .find(e => e.date && e.time);
   let nextFireMs;
   if (lastFire) {
-    // Reconstruct the UTC slot time from the last fired slot (sydneyWallToUtc)
+    // Reconstruct the UTC time of the just-booked slot from its date+time
+    // in Sydney. The next fire happens AT that time — the opening of the
+    // next slot (T+7d). The next slot itself is T+7d, which slotForFire
+    // computes from the fire time.
     const slotUtc = time.sydneyWallToUtc(lastFire.date, lastFire.time);
-    nextFireMs = slotUtc + 7 * 86_400_000;
+    nextFireMs = slotUtc;
   } else {
     // Fall back: next weekday from now
     const nextTarget = time.nextWeekdayAt(cur.day_of_week, cur.time, { after: Date.now() + 60_000 });

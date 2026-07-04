@@ -23,15 +23,28 @@ function findConflictingCourts({ dayOfWeek, time, excludeId = null }) {
 }
 
 function allocateCourt(preferredCourt, conflicts) {
-  if (!ALLOWED_COURTS.includes(String(preferredCourt))) {
+  // "any" / null / "" / "any" → auto-allocate the first non-conflicting court
+  // (in ascending 4 → 5 → 6 order). This is the common case from the
+  // v3.4 Make Booking form's "Court: any" dropdown.
+  const pref = preferredCourt == null ? '' : String(preferredCourt).trim();
+  const isAny = pref === '' || pref.toLowerCase() === 'any';
+  if (isAny) {
+    for (const c of ALLOWED_COURTS) {
+      if (!conflicts.includes(c)) {
+        return { court: c, no_courts_available: false, auto_allocated: true, original_court: null };
+      }
+    }
     return { court: null, no_courts_available: true };
   }
-  if (!conflicts.includes(String(preferredCourt))) {
-    return { court: String(preferredCourt), no_courts_available: false, auto_allocated: false };
+  if (!ALLOWED_COURTS.includes(pref)) {
+    return { court: null, no_courts_available: true };
+  }
+  if (!conflicts.includes(pref)) {
+    return { court: pref, no_courts_available: false, auto_allocated: false };
   }
   for (const c of ALLOWED_COURTS) {
     if (!conflicts.includes(c)) {
-      return { court: c, no_courts_available: false, auto_allocated: true, original_court: String(preferredCourt) };
+      return { court: c, no_courts_available: false, auto_allocated: true, original_court: pref };
     }
   }
   return { court: null, no_courts_available: true };

@@ -175,21 +175,22 @@ const recurring = {
   },
   create(r) {
     const stmt = db.get().prepare(
-      `INSERT INTO recurring_bookings (account_id, label, court_pref, courts, day_of_week, time, duration_mins, lead_minutes, enabled, first_occurrence_action, next_fire_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO recurring_bookings (account_id, label, court_pref, courts, day_of_week, time, duration_mins, lead_minutes, enabled, first_occurrence_action, next_fire_at, first_slot_date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const info = stmt.run(
       r.account_id, r.label, r.court_pref, JSON.stringify(r.courts || [r.court_pref]),
       r.day_of_week, r.time, r.duration_mins || 60, r.lead_minutes || 10,
       r.enabled === false ? 0 : 1,
       r.first_occurrence_action || null, r.next_fire_at || null,
+      r.first_slot_date || null,
       nowIso(), nowIso()
     );
     return recurring.get(info.lastInsertRowid);
   },
 
   update(id, fields) {
-    const allowed = ['label', 'court_pref', 'courts', 'day_of_week', 'time', 'duration_mins', 'lead_minutes', 'enabled', 'next_fire_at', 'last_fire_at', 'last_status', 'last_msg', 'last_error_category', 'error_dismissed_at', 'first_occurrence_action'];
+    const allowed = ['label', 'court_pref', 'courts', 'day_of_week', 'time', 'duration_mins', 'lead_minutes', 'enabled', 'next_fire_at', 'last_fire_at', 'last_status', 'last_msg', 'last_error_category', 'error_dismissed_at', 'first_occurrence_action', 'first_slot_date'];
     const sets = []; const vals = [];
     for (const k of allowed) if (k in fields) {
       sets.push(`${k} = ?`);

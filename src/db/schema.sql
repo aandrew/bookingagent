@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS recurring_bookings (
   last_error_category     TEXT,
   error_dismissed_at      TEXT,
   first_occurrence_action TEXT,
+  -- v3.4: the FIRST slot the user picked (the "anchor" of the weekly schedule).
+  -- The first fire is scheduled 7 days before this date at the recurring's time
+  -- (the opening moment). The chain then sets each subsequent fire to the
+  -- just-booked slot's time (also the opening of the next slot). Nullable for
+  -- backward compat with rows created before v3.4 — those use the
+  -- nextWeekdayAt logic.
+  first_slot_date         TEXT,
   created_at              TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -29,12 +29,22 @@ function nextFireUtcMs(rec) {
   return new Date(rec.next_fire_at).getTime();
 }
 
-// Returns the slot (date, from, to) we will book at `fireMs`. The "slot" is
-// at fireMs itself (since each fire books a slot AT the fire time, by the
-// pattern "every Wed 7pm, starting at the first Wed 7pm from now"). The
-// release of the next slot is exactly the slot we just booked.
+// Returns the slot (date, from, to) we will book at `fireMs`.
+//
+// v3.4: the fire happens at the OPENING of a slot (T-7d, where T is the
+// slot's time). So the slot we book is T = fireMs + 7d. For the very
+// first fire, the row carries first_slot_date — we use that directly so
+// the picked slot is honoured even when the opening has already passed
+// and the fire happens at the slot's closing moment.
 function slotForFire(rec, fireMs) {
-  const dateStr = time.sydneyDateString(fireMs);
+  let dateStr;
+  if (!rec.last_fire_at && rec.first_slot_date) {
+    // First fire: honour the user-picked slot date.
+    dateStr = rec.first_slot_date;
+  } else {
+    // Subsequent fires: the slot is 7 days after the fire time.
+    dateStr = time.sydneyDateString(fireMs + 7 * 86_400_000);
+  }
   const from = timeToSlot(rec.time);
   const to = from + Math.max(1, Math.round((rec.duration_mins || 60) / 30));
   return { date: dateStr, from, to };

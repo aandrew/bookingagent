@@ -30,11 +30,29 @@ function pickTimeWindow(watch) {
   return { from, to };
 }
 
+// v3.4: Koorora only allows bookings up to 7 days in advance. If the
+// target date is beyond that, we don't even attempt — the API silently
+// returns the nearest bookable week, which would book the wrong date.
+// The user must use the Make Booking form (recurring) for >7 days.
+function isWithinBookingWindow(targetDateStr) {
+  if (!targetDateStr) return false;
+  const target = new Date(String(targetDateStr) + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((target - today) / 86_400_000);
+  return diffDays >= 0 && diffDays <= 7;
+}
+
 async function runWatch(watch) {
   const account = repo.accounts.get(watch.account_id);
   if (!account || !account.enabled) {
     repo.watches.recordRun(watch.id, 'skipped', 'account disabled or missing');
     return { status: 'skipped' };
+  }
+  const targetDate = pickTargetDate(watch);
+  if (!isWithinBookingWindow(targetDate)) {
+    const msg = `Date ${targetDate} is more than 7 days out — Koorora only allows bookings within 7 days. Use the Make Booking form (recurring) for dates > 7 days out.`;
+    repo.watches.recordRun(watch.id, 'scheduled', msg);
+    return { status: 'scheduled', reason: msg, date: targetDate };
   }
   return withClient(account.id, async (client) => {
     const date = pickTargetDate(watch);
@@ -108,4 +126,4 @@ async function bookNow(watchId) {
   return runWatch(w);
 }
 
-module.exports = { runAll, runWatch, bookNow, pickTargetDate, pickTimeWindow };
+module.exports = { runAll, runWatch, bookNow, pickTargetDate, pickTimeWindow, isWithinBookingWindow };

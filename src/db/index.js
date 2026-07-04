@@ -31,6 +31,7 @@ function migrate(d) {
   add(`ALTER TABLE recurring_bookings ADD COLUMN last_error_category TEXT`);
   add(`ALTER TABLE recurring_bookings ADD COLUMN error_dismissed_at TEXT`);
   add(`ALTER TABLE recurring_bookings ADD COLUMN first_occurrence_action TEXT`);
+  add(`ALTER TABLE recurring_bookings ADD COLUMN first_slot_date TEXT`);
 }
 
 function get() {
