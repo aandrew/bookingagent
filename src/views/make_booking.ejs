@@ -1,82 +1,338 @@
 <%- include('partials/header', { title: 'Make Booking' }) %>
+<style>
+  .field-error { color: var(--err); font-size: 12px; margin-top: 4px; min-height: 14px; }
+  .field-error:empty { display: none; }
+  .help { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .result-panel { margin-top: 14px; padding: 12px 14px; border-radius: 6px; display: none; }
+  .result-panel.ok { background: rgba(94,224,167,.12); border: 1px solid var(--accent); color: var(--text); }
+  .result-panel.err { background: rgba(224,108,117,.12); border: 1px solid var(--err); color: var(--text); }
+  .result-panel h3 { margin: 0 0 6px; font-size: 14px; }
+  .result-panel pre { background: #0a0c10; color: #cfd5dd; padding: 8px 10px; border-radius: 4px; margin: 6px 0 0; max-height: 200px; overflow: auto; font-size: 12px; }
+  .time-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .time-row select { width: 100%; }
+  .dim { opacity: 0.5; pointer-events: none; }
+</style>
+
 <div class="panel">
   <h2>Make Booking</h2>
-  <form id="addForm" onsubmit="addBooking(event)">
+  <form id="addForm" onsubmit="return addBooking(event)">
     <div class="grid2">
-      <div><label>Account</label>
-        <select name="account_id" required>
+      <div>
+        <label>Account</label>
+        <select name="account_id" id="account_id" required>
+          <option value="">— pick an account —</option>
           <% accounts.forEach(function(a) { %><option value="<%= a.id %>"><%= a.label %> (<%= a.username %>)</option><% }) %>
         </select>
+        <div class="help">Which Kooroo account to book under</div>
       </div>
-      <div><label>Label</label><input type="text" name="label" required></div>
-      <div><label>Court (optional)</label>
-        <select name="court">
+      <div>
+        <label>Court</label>
+        <select name="court" id="court">
           <option value="">— any (auto-allocate) —</option>
           <option value="4">Court 4</option>
           <option value="5">Court 5</option>
           <option value="6">Court 6</option>
         </select>
+        <div class="help">If you don't pick one, we'll assign the first free court for that time slot</div>
       </div>
-      <div><label>Strategy</label>
-        <select name="strategy"><option value="watch">watch</option><option value="scheduled">scheduled</option></select>
+      <div>
+        <label>Date</label>
+        <input type="date" name="date" id="date" required>
+        <div class="help">Sydney date. The system auto-detects: today–7 days = book now, further = schedule</div>
       </div>
-      <div><label>Date (from)</label><input type="text" name="date_from" placeholder="YYYY-MM-DD"></div>
-      <div><label>Date (to)</label><input type="text" name="date_to" placeholder="YYYY-MM-DD"></div>
-      <div><label>Time start</label><input type="text" name="time_start" placeholder="HH:MM"></div>
-      <div><label>Time end</label><input type="text" name="time_end" placeholder="HH:MM"></div>
-      <div><label>Lead days</label><input type="number" name="lead_days" value="7"></div>
-      <div><label>Duration (mins)</label><input type="number" name="duration_mins" value="60"></div>
-    </div>
-    <div style="margin-top: 10px;">
-      <label style="display:inline-block; font-size: 14px; color: var(--text); margin: 0;">
-        <input type="checkbox" id="makeRecurring" onchange="document.getElementById('recurringFields').classList.toggle('hidden', !this.checked)">
-        Make this a <strong>recurring</strong> weekly booking
-      </label>
-    </div>
-    <div id="recurringFields" class="hidden grid2" style="margin-top: 8px;">
-      <div><label>Day of week (recurring)</label>
-        <select name="recurring_day_of_week">
-          <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
-          <option value="3" selected>Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
-        </select>
+      <div>
+        <label>Start time (Sydney)</label>
+        <div class="time-row">
+          <select name="time_hour" id="time_hour" required>
+            <% for (let h = 1; h <= 12; h++) { %><option value="<%= h %>" <%= h === 7 ? 'selected' : '' %>><%= h %></option><% } %>
+          </select>
+          <select name="time_minute" id="time_minute" required>
+            <% for (const m of ['00','15','30','45']) { %><option value="<%= m %>" <%= m === '00' ? 'selected' : '' %>><%= m %></option><% } %>
+          </select>
+          <select name="time_ampm" id="time_ampm" required>
+            <option value="AM">AM</option>
+            <option value="PM" selected>PM</option>
+          </select>
+        </div>
+        <div class="help">End time is computed from Duration below</div>
       </div>
-      <div><label>Time (recurring, Sydney)</label><input type="time" name="recurring_time" value="19:00"></div>
+      <div>
+        <label>Duration (mins)</label>
+        <input type="number" name="duration_mins" id="duration_mins" value="60" min="30" max="180" step="30" required>
+        <div class="help">Length of the booking (end time = start time + duration)</div>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <label style="display:inline-block; font-size: 14px; color: var(--text); margin: 0;">
+          <input type="checkbox" id="makeRecurring" onchange="toggleRecurring()">
+          Make this a <strong>recurring</strong> weekly booking
+        </label>
+        <div class="help">When on, the date+time fields are replaced by a day-of-week + time picker</div>
+      </div>
     </div>
-    <div style="margin-top: 10px;"><button type="submit">Add booking</button></div>
+
+    <div id="recurringFields" class="hidden" style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);">
+      <div class="grid2">
+        <div>
+          <label>Day of week</label>
+          <select name="recurring_day_of_week" id="recurring_day_of_week">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3" selected>Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+          </select>
+          <div class="help">Which weekday to book each week</div>
+        </div>
+        <div>
+          <label>Time (Sydney)</label>
+          <div class="time-row">
+            <select name="recurring_hour">
+              <% for (let h = 1; h <= 12; h++) { %><option value="<%= h %>" <%= h === 7 ? 'selected' : '' %>><%= h %></option><% } %>
+            </select>
+            <select name="recurring_minute">
+              <% for (const m of ['00','15','30','45']) { %><option value="<%= m %>" <%= m === '00' ? 'selected' : '' %>><%= m %></option><% } %>
+            </select>
+            <select name="recurring_ampm">
+              <option value="AM">AM</option>
+              <option value="PM" selected>PM</option>
+            </select>
+          </div>
+          <div class="help">When during the day to book</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="formError" class="field-error" style="margin-top: 10px;"></div>
+
+    <div style="margin-top: 14px; display: flex; gap: 10px; align-items: center;">
+      <button type="submit" id="submitBtn">Add booking</button>
+      <span id="spinner" class="spinner" style="display: none;"></span>
+      <span id="status" class="muted" style="font-size: 12px;"></span>
+    </div>
   </form>
+
+  <div id="result" class="result-panel"></div>
 </div>
+
 <script>
+  const DAY_CODES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MONTH_CODES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  function toggleRecurring() {
+    const on = document.getElementById('makeRecurring').checked;
+    document.getElementById('recurringFields').classList.toggle('hidden', !on);
+    // Required toggling for the inputs
+    document.getElementById('date').required = !on;
+    document.getElementById('time_hour').required = !on;
+  }
+  // Run once on load
+  toggleRecurring();
+
+  // Convert (hour, minute, ampm) → 24h "HH:MM"
+  function timeTo24(h, m, ap) {
+    let hh = parseInt(h, 10) % 12;
+    if (ap === 'PM') hh += 12;
+    return String(hh).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+
+  // Build a human label like "Wed 7pm" or "8 Jul 7pm"
+  function buildLabel({ date, time, recurringDayOfWeek }) {
+    const t = formatTime12hFrom24(time); // "7pm"
+    if (recurringDayOfWeek != null) {
+      return DAY_CODES[recurringDayOfWeek] + ' ' + t;
+    }
+    // date is YYYY-MM-DD
+    const [y, mo, d] = date.split('-').map(Number);
+    return d + ' ' + MONTH_CODES[mo - 1] + ' ' + t;
+  }
+  function formatTime12hFrom24(hhmm) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ''));
+    if (!m) return hhmm;
+    const h = parseInt(m[1], 10);
+    const min = m[2];
+    const ampm = h < 12 ? 'am' : 'pm';
+    const h12 = ((h + 11) % 12) + 1;
+    return min === '00' ? (h12 + ampm) : (h12 + ':' + min + ampm);
+  }
+
+  // Compute end time as "HH:MM" given start "HH:MM" + duration mins
+  function endTime(start, durMins) {
+    const [h, m] = start.split(':').map(Number);
+    const total = h * 60 + m + durMins;
+    const eh = Math.floor(total / 60) % 24;
+    const em = total % 60;
+    return String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0');
+  }
+
+  // Show inline field error
+  function showFieldError(id, msg) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = msg || '';
+  }
+  function clearFieldErrors() {
+    document.querySelectorAll('.field-error').forEach(e => e.textContent = '');
+  }
+
+  // Field validation
+  function validateOneOff({ dateStr, timeStr, duration }) {
+    if (!dateStr) return 'Date is required (use the calendar picker).';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return 'Date must be in YYYY-MM-DD format.';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return 'Date is not a real date.';
+    if (d < today) return 'Date is in the past — pick today or later.';
+    if (!/^\d{2}:\d{2}$/.test(timeStr)) return 'Time must be selected from the dropdowns.';
+    if (!duration || duration < 30 || duration > 180) return 'Duration must be between 30 and 180 minutes.';
+    return null;
+  }
+  function validateRecurring({ dayOfWeek, timeStr, duration }) {
+    if (dayOfWeek == null) return 'Pick a day of week.';
+    if (!/^\d{2}:\d{2}$/.test(timeStr)) return 'Time must be selected from the dropdowns.';
+    if (!duration || duration < 30 || duration > 180) return 'Duration must be between 30 and 180 minutes.';
+    return null;
+  }
+
+  // Format a fetch error into a user-friendly message
+  function explainError(err, path) {
+    let msg = err.message || String(err);
+    if (/attempt to write a readonly database/i.test(msg)) {
+      return 'The database is in read-only mode. This usually means the data directory is owned by a different user than the container. Run `tools/deploy.sh` — it has a self-healing chown step.';
+    }
+    if (/account_id and label required/i.test(msg)) {
+      return 'Internal: the server rejected the request. Make sure you picked an account.';
+    }
+    if (/court_pref must be one of/i.test(msg)) {
+      return 'Invalid court preference. Pick a court or leave it on "any (auto-allocate)".';
+    }
+    if (/day_of_week must be 0-6/i.test(msg)) {
+      return 'Invalid day of week.';
+    }
+    if (/time must be HH:MM/i.test(msg)) {
+      return 'Invalid time. Use the dropdowns, not free text.';
+    }
+    if (/no_courts_available/i.test(msg)) {
+      return 'No courts available at this time slot — all 3 courts are taken by other recurring bookings.';
+    }
+    if (/no_time_available/i.test(msg)) {
+      return 'The slot is not available on the Kooroo site. Someone else already booked it.';
+    }
+    if (/auth_required|session_expired|login_required/i.test(msg)) {
+      return 'Your Kooroo session expired. Click "Re-login" on the Accounts page.';
+    }
+    return msg + (path ? '  (path: ' + path + ')' : '');
+  }
+
   async function addBooking(e) {
     e.preventDefault();
+    clearFieldErrors();
+    document.getElementById('result').style.display = 'none';
+    document.getElementById('result').className = 'result-panel';
+
     const f = e.target;
-    const recurringOn = f.makeRecurring?.checked;
+    const recurringOn = !!f.makeRecurring?.checked;
+
+    let body, label, path, validationErr = null;
+
     if (recurringOn) {
-      const body = {
-        account_id: parseInt(f.account_id.value, 10),
-        label: f.label.value,
-        day_of_week: parseInt(f.recurring_day_of_week.value, 10),
-        time: f.recurring_time.value,
-        court_pref: f.court.value || null,
-        duration_mins: parseInt(f.duration_mins.value, 10) || 60,
-      };
-      try {
-        const r = await jsonReq('/api/recurring', { method: 'POST', body: JSON.stringify(body) });
-        let msg = 'Created recurring #' + r.id + ' (' + r.first_occurrence_action + ')';
-        if (r.court_auto_allocated && r.original_court_pref) {
-          msg += ' — court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + ' (C' + r.original_court_pref + ' was already taken at this time).';
-        } else if (r.no_courts_available) {
-          msg += ' — NO COURTS AVAILABLE: all 3 courts are taken at this time slot.';
-        }
-        alert(msg);
-        location.href = '/bookings';
-      } catch (e) { alert(e.message); }
-      return;
+      const dayOfWeek = parseInt(f.recurring_day_of_week.value, 10);
+      const time = timeTo24(f.recurring_hour.value, f.recurring_minute.value, f.recurring_ampm.value);
+      const duration = parseInt(f.duration_mins.value, 10);
+      validationErr = validateRecurring({ dayOfWeek, timeStr: time, duration });
+      if (!validationErr) {
+        body = {
+          account_id: parseInt(f.account_id.value, 10),
+          day_of_week: dayOfWeek,
+          time: time,
+          court_pref: f.court.value || null,
+          duration_mins: duration,
+        };
+        label = buildLabel({ date: null, time, recurringDayOfWeek: dayOfWeek });
+        path = '/api/recurring';
+      }
+    } else {
+      const dateStr = f.date.value;
+      const time = timeTo24(f.time_hour.value, f.time_minute.value, f.time_ampm.value);
+      const duration = parseInt(f.duration_mins.value, 10);
+      validationErr = validateOneOff({ dateStr, timeStr: time, duration });
+      if (!validationErr) {
+        const end = endTime(time, duration);
+        body = {
+          account_id: parseInt(f.account_id.value, 10),
+          date_from: dateStr,
+          date_to: dateStr,
+          time_start: time,
+          time_end: end,
+          duration_mins: duration,
+          court: f.court.value || null,
+          // No strategy / lead_days / label sent — server decides / auto-generates.
+        };
+        label = buildLabel({ date: dateStr, time });
+        path = '/api/watches';
+      }
     }
-    // one-off watch
-    const body = {};
-    for (const el of f.elements) if (el.name && !el.name.startsWith('recurring_')) body[el.name] = el.value;
-    try { await jsonReq('/api/watches', { method: 'POST', body: JSON.stringify(body) }); location.href = '/bookings'; }
-    catch (e) { alert(e.message); }
+
+    if (validationErr) {
+      showFieldError('formError', validationErr);
+      return false;
+    }
+
+    if (!body.account_id) {
+      showFieldError('formError', 'Pick an account.');
+      return false;
+    }
+
+    // Submit
+    const submitBtn = document.getElementById('submitBtn');
+    const spinner = document.getElementById('spinner');
+    const status = document.getElementById('status');
+    submitBtn.disabled = true;
+    submitBtn.classList.add('dim');
+    spinner.style.display = 'inline-block';
+    status.textContent = recurringOn
+      ? 'Saving recurring booking…'
+      : 'Saving one-off booking…';
+    document.getElementById('formError').textContent = '';
+
+    try {
+      const r = await jsonReq(path, { method: 'POST', body: JSON.stringify(body) });
+      let extra = '';
+      if (r.court_auto_allocated && r.original_court_pref) {
+        extra = ' — court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + ' (C' + r.original_court_pref + ' was already taken at this time).';
+      } else if (r.no_courts_available) {
+        extra = ' — NO COURTS AVAILABLE: all 3 courts are taken at this time slot.';
+      } else if (r.first_occurrence_action) {
+        extra = ' — first occurrence: ' + r.first_occurrence_action;
+      }
+      status.textContent = 'Saved.';
+      const result = document.getElementById('result');
+      result.style.display = 'block';
+      result.className = 'result-panel ok';
+      result.innerHTML = '<h3>✓ Booking created — label: <code>' + label + '</code></h3>'
+        + '<p class="muted" style="font-size: 12px; margin: 4px 0;">' + (extra || 'Find it in <a href="/bookings">Current Bookings</a>.') + '</p>'
+        + '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+      // Auto-redirect after a short pause
+      setTimeout(() => { location.href = '/bookings'; }, 1500);
+    } catch (e) {
+      const friendly = explainError(e, path);
+      status.textContent = 'Failed.';
+      showFieldError('formError', friendly);
+      const result = document.getElementById('result');
+      result.style.display = 'block';
+      result.className = 'result-panel err';
+      result.innerHTML = '<h3>✗ Could not save booking</h3>'
+        + '<p style="margin: 4px 0;">' + friendly + '</p>'
+        + (e.message !== friendly ? '<pre>' + e.message + '</pre>' : '');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('dim');
+      spinner.style.display = 'none';
+    }
+    return false;
   }
 </script>
 <%- include('partials/footer') %>

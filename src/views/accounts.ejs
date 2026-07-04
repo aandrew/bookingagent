@@ -1,14 +1,30 @@
 <%- include('partials/header', { title: 'Accounts' }) %>
+<style>
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .dim { opacity: 0.5; pointer-events: none; }
+  .add-status { margin-top: 10px; font-size: 13px; }
+  .add-status.err { color: var(--err); }
+  .add-status.ok { color: var(--accent); }
+  details { background: var(--panel2); border-radius: 6px; padding: 6px 10px; margin-top: 10px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+</style>
+
 <div class="panel">
   <h2>Add account</h2>
-  <p class="muted" style="font-size: 12px;">On add, the system will run a browser re-login to verify the credentials. If it works the state moves to <code>tested_ok</code> immediately; if it fails you'll see the error in the state column.</p>
-  <form id="addForm" onsubmit="addAccount(event)">
+  <p class="muted" style="font-size: 12px;">On add, the system runs a Playwright browser re-login against kooroo.asn.au to verify the credentials. The reCAPTCHA on the Kooroo login form means we can't do this with plain HTTP — Playwright drives a real Chromium browser. This usually takes 15–30 seconds. If it works the state moves to <code>tested_ok</code>; if it fails you'll see the error in the state column.</p>
+  <form id="addForm" onsubmit="return addAccount(event)">
     <div class="grid2">
-      <div><label>Label</label><input type="text" name="label" required></div>
-      <div><label>Username</label><input type="text" name="username" required></div>
-      <div><label>Password</label><input type="password" name="password" required></div>
+      <div><label>Label</label><input type="text" name="label" required title="Free-text label, e.g. 'Andrew Stevens'"></div>
+      <div><label>Username</label><input type="text" name="username" required title="Your Koorora login username (the one you type into the login form)"></div>
+      <div><label>Password</label><input type="password" name="password" required title="Your Koorora login password"></div>
     </div>
-    <div style="margin-top: 10px;"><button type="submit">Add & test login</button></div>
+    <div style="margin-top: 14px; display: flex; gap: 10px; align-items: center;">
+      <button type="submit" id="addBtn">Add & test login</button>
+      <span id="addSpinner" class="spinner" style="display: none;"></span>
+      <span id="addStatus" class="muted" style="font-size: 12px;"></span>
+    </div>
+    <div id="addError" class="add-status err" style="display: none;"></div>
   </form>
 </div>
 
@@ -34,8 +50,8 @@
         </td>
         <td><%= a.enabled ? 'yes' : 'no' %></td>
         <td>
-          <button class="secondary" onclick="relogin(<%= a.id %>)">Re-login</button>
-          <button class="secondary" onclick="probe(<%= a.id %>)">Probe</button>
+          <button class="secondary" onclick="relogin(<%= a.id %>)" title="Re-run the Playwright login to refresh the stored session">Re-login</button>
+          <button class="secondary" onclick="probe(<%= a.id %>)" title="Quick HTTP probe of the stored session (no browser)">Probe</button>
           <button class="danger" onclick="removeAccount(<%= a.id %>)">Delete</button>
         </td>
       </tr>
@@ -45,18 +61,71 @@
 </div>
 
 <script>
+  function setBusy(busy) {
+    const btn = document.getElementById('addBtn');
+    const spinner = document.getElementById('addSpinner');
+    const status = document.getElementById('addStatus');
+    btn.disabled = busy;
+    btn.classList.toggle('dim', busy);
+    spinner.style.display = busy ? 'inline-block' : 'none';
+    if (busy) {
+      status.textContent = 'Logging in to kooroo.asn.au with Chromium…';
+    }
+  }
+  function showAddError(msg) {
+    const el = document.getElementById('addError');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+  }
+  function showAddOk(msg) {
+    const el = document.getElementById('addError');
+    el.textContent = msg;
+    el.className = 'add-status ok';
+    el.style.display = msg ? 'block' : 'none';
+  }
+  function explainAccountError(err) {
+    const m = err.message || String(err);
+    if (/attempt to write a readonly database/i.test(m)) {
+      return 'Database is read-only (host/container uid mismatch). Run `tools/deploy.sh` to self-heal.';
+    }
+    if (/spike failed/i.test(m)) {
+      return 'The Playwright login failed. Common causes: wrong username/password, Koorora site change, or reCAPTCHA. See the Accounts page state column for the underlying error. You can also run `npm run spike` locally to debug.';
+    }
+    if (/timed? ?out/i.test(m)) {
+      return 'The Playwright login timed out. Koorora may be slow; click Re-login on the new account to retry.';
+    }
+    return m;
+  }
+
   async function addAccount(e) {
     e.preventDefault();
+    showAddError('');
     const f = e.target;
+    setBusy(true);
     try {
       const a = await jsonReq('/api/accounts', { method: 'POST', body: JSON.stringify({ label: f.label.value, username: f.username.value, password: f.password.value }) });
-      alert('Added #' + a.id + ' — test: ' + JSON.stringify(a.test));
-      location.reload();
-    } catch (e) { alert(e.message); }
+      if (a.test && a.test.ok) {
+        showAddOk('Added #' + a.id + ' — credentials verified (state: tested_ok). Reloading…');
+      } else {
+        showAddError('Added #' + a.id + ' but credential test FAILED: ' + (a.test?.error || 'unknown'));
+      }
+      setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+      showAddError(explainAccountError(e));
+    } finally {
+      setBusy(false);
+    }
+    return false;
   }
   async function relogin(id) {
-    try { const r = await jsonReq('/api/accounts/' + id + '/relogin', { method: 'POST' }); alert('Re-login: ' + JSON.stringify(r)); location.reload(); }
-    catch (e) { alert(e.message); }
+    setBusy(true);
+    document.getElementById('addStatus').textContent = 'Re-logging in account #' + id + '…';
+    try {
+      const r = await jsonReq('/api/accounts/' + id + '/relogin', { method: 'POST' });
+      alert('Re-login: ' + JSON.stringify(r));
+      location.reload();
+    } catch (e) { alert(explainAccountError(e)); }
+    finally { setBusy(false); }
   }
   async function probe(id) {
     try { const r = await jsonReq('/api/accounts/' + id + '/probe', { method: 'POST' }); alert('Probe: ' + JSON.stringify(r)); }
@@ -65,7 +134,7 @@
   async function removeAccount(id) {
     if (!confirm('Delete account #' + id + '?')) return;
     try { await jsonReq('/api/accounts/' + id, { method: 'DELETE' }); location.reload(); }
-    catch (e) { alert(e.message); }
+    catch (e) { alert(explainAccountError(e)); }
   }
 </script>
 <%- include('partials/footer') %>

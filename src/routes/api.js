@@ -103,7 +103,44 @@ router.get('/accounts/:id/state', requireAdmin, (req, res) => {
 router.get('/watches', requireAdmin, (req, res) => res.json(repo.watches.list()));
 router.post('/watches', requireAdmin, (req, res) => {
   const w = req.body || {};
-  if (!w.account_id || !w.label) return res.status(400).json({ error: 'account_id and label required' });
+  if (!w.account_id) return res.status(400).json({ error: 'account_id is required' });
+  if (!w.date_from) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
+  if (!w.time_start) return res.status(400).json({ error: 'time_start is required (HH:MM, Sydney)' });
+  if (!w.duration_mins) return res.status(400).json({ error: 'duration_mins is required' });
+  // Auto-detect strategy:
+  //   - If the date is within the 7-day Kooroo booking window, use "watch" so
+  //     monitor.js fires it as soon as possible.
+  //   - Otherwise, use "scheduled" so monitor.js targets the explicit date.
+  const target = new Date(String(w.date_from) + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((target - today) / 86_400_000);
+  w.strategy = diffDays <= 7 ? 'watch' : 'scheduled';
+  // Auto-derive end time if not given
+  if (!w.time_end && w.time_start && w.duration_mins) {
+    const [hh, mm] = String(w.time_start).split(':').map(Number);
+    const total = hh * 60 + mm + Number(w.duration_mins);
+    const eh = Math.floor(total / 60) % 24;
+    const em = total % 60;
+    w.time_end = String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0');
+  }
+  // Auto-generate label if not provided
+  if (!w.label) {
+    const t = (w.time_start || '').slice(0, 5);
+    const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+    let prettyTime = t;
+    if (m) {
+      const h = parseInt(m[1], 10);
+      const min = m[2];
+      const ampm = h < 12 ? 'am' : 'pm';
+      const h12 = ((h + 11) % 12) + 1;
+      prettyTime = min === '00' ? (h12 + ampm) : (h12 + ':' + min + ampm);
+    }
+    const [y, mo, d] = String(w.date_from).split('-').map(Number);
+    const MONTH = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    w.label = d + ' ' + MONTH[mo - 1] + ' ' + prettyTime;
+  }
+  // lead_days is ignored — we have an explicit date. Default 7 for legacy readers.
+  w.lead_days = 7;
   res.status(201).json(repo.watches.create(w));
 });
 router.patch('/watches/:id', requireAdmin, (req, res) => {
