@@ -106,7 +106,7 @@ class KoorooClient {
     return [...fromJar, ...fromManual].join('; ');
   }
 
-  async request({ method = 'POST', path, body, headers = {} }) {
+  async request({ method = 'POST', path, body, headers = {}, bodyTimeout, headersTimeout }) {
     const url = path.startsWith('http') ? path : `${endpoints.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
     const h = {
       'user-agent': 'kooroo-booking-agent/0.1 (+local)',
@@ -120,10 +120,13 @@ class KoorooClient {
       h['content-type'] = h['content-type'] || 'application/x-www-form-urlencoded; charset=UTF-8';
       body = new URLSearchParams(body).toString();
     }
+    const fetchOpts = { method, headers: h, body, dispatcher, redirect: 'manual' };
+    if (bodyTimeout != null) fetchOpts.bodyTimeout = bodyTimeout;
+    if (headersTimeout != null) fetchOpts.headersTimeout = headersTimeout;
     const t0 = Date.now();
     let res, text, err = null;
     try {
-      res = await undiciFetch(url, { method, headers: h, body, dispatcher, redirect: 'manual' });
+      res = await undiciFetch(url, fetchOpts);
       text = await res.text();
       const setCookies = res.headers.getSetCookie ? res.headers.getSetCookie() : [];
       for (const sc of setCookies) {
@@ -176,9 +179,9 @@ class KoorooClient {
     }
   }
 
-  async ajaxAction(action, fields = {}) {
+  async ajaxAction(action, fields = {}, opts = {}) {
     const body = { action, ...fields };
-    const { status, text } = await this.request({ method: 'POST', path: API.replace(endpoints.baseUrl, ''), body });
+    const { status, text } = await this.request({ method: 'POST', path: API.replace(endpoints.baseUrl, ''), body, ...opts });
     let parsed = null;
     try { parsed = JSON.parse(text); } catch { parsed = text; }
     return { status, body: parsed, raw: text };
@@ -188,7 +191,7 @@ class KoorooClient {
     return this.ajaxAction(endpoints.api.actions.getDaySchedule.name, { date });
   }
 
-  async createBooking({ date, from, to, court_id, first_day_of_week = null, last_day_of_week = null }) {
+  async createBooking({ date, from, to, court_id, first_day_of_week = null, last_day_of_week = null }, opts = {}) {
     return this.ajaxAction(endpoints.api.actions.createBooking.name, {
       date,
       from: String(from),
@@ -197,7 +200,7 @@ class KoorooClient {
       user_id: String(this.userId),
       first_day_of_week: first_day_of_week || '',
       last_day_of_week: last_day_of_week || '',
-    });
+    }, opts);
   }
 
   async updateBooking({ id, from, to, date, first_day_of_week = null, last_day_of_week = null }) {

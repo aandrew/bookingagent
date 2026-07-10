@@ -153,4 +153,48 @@ async function fireDueWatches() {
   return { fired: results.length, results };
 }
 
-module.exports = { runAll, runWatch, bookNow, fireDueWatches, pickTargetDate, pickTimeWindow, isWithinBookingWindow };
+module.exports = { runAll, runWatch, bookNow, fireDueWatches, pickTargetDate, pickTimeWindow, isWithinBookingWindow, reconcileUnverifiedBookings };
+
+// v3.6: reconcile bookings that the server confirmed (cat.code === 'booked')
+// but where the day-schedule lookup right after the POST didn't see the new
+// row in the server's response. We re-fetch the day schedule and try to find
+// the booking again. If found, we fill in external_id and flip to 'confirmed'.
+// This is the fix for the "confirmed in our DB but no external_id" desync.
+async function reconcileUnverifiedBookings({ olderThanMs = 30_000, maxItems = 25 } = {}) {
+  const pending = repo.bookings.listUnverified({ olderThanMs, limit: maxItems });
+  if (!pending.length) return { checked: 0, confirmed: 0, abandoned: 0, results: [] };
+  const results = [];
+  let confirmed = 0;
+  let abandoned = 0;
+  for (const b of pending) {
+    const account = repo.accounts.get(b.account_id);
+    if (!account || !account.enabled) {
+      results.push({ id: b.id, status: 'skipped', reason: 'account disabled or missing' });
+      continue;
+    }
+    try {
+      const result = await withClient(account.id, async (client) => {
+        const date = b.date;
+        const from = require('../kooroo/client').timeToSlot(b.start_time);
+        const to = require('../kooroo/client').timeToSlot(b.end_time);
+        if (!from || !to) return { status: 'bad_slot' };
+        const courtId = b.court ? String(b.court) : null;
+        if (!courtId) return { status: 'no_court' };
+        return await require('../kooroo/booking').findBookingFor(client, { date, from, to, court_id: courtId });
+      });
+      if (result && result.id) {
+        repo.bookings.markVerified(b.id, result.id);
+        confirmed++;
+        results.push({ id: b.id, status: 'confirmed', external_id: result.id });
+        log.info('reconcile.confirmed', { booking: b.id, account: b.account_id, external_id: result.id });
+      } else {
+        results.push({ id: b.id, status: 'still_unverified', reason: result?.status || 'no_match' });
+      }
+    } catch (e) {
+      log.error('reconcile.error', { booking: b.id, error: e.message });
+      results.push({ id: b.id, status: 'error', error: e.message });
+    }
+  }
+  if (confirmed > 0) log.info('reconcile.summary', { checked: pending.length, confirmed });
+  return { checked: pending.length, confirmed, abandoned, results };
+}

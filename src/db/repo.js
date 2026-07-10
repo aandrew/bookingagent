@@ -169,6 +169,20 @@ const bookings = {
   listForRecurring(recurringId, limit = 50) {
     return db.get().prepare(`SELECT * FROM bookings WHERE recurring_id = ? ORDER BY id DESC LIMIT ?`).all(recurringId, limit);
   },
+  listUnverified({ olderThanMs = 30_000, limit = 50 } = {}) {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    return db.get().prepare(`
+      SELECT * FROM bookings
+      WHERE status = 'booked_unverified'
+        AND external_id IS NULL
+        AND created_at < ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(cutoff, limit);
+  },
+  markVerified(id, externalId) {
+    return bookings.update(id, { status: 'confirmed', external_id: String(externalId) });
+  },
 };
 
 const recurring = {

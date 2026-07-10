@@ -587,6 +587,267 @@ test('v3.4: chainToNextWeek — next fire is at the just-booked slot time (the n
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
+// ---- v3.6: booked_unverified + reconciliation + fire context ----
+
+test('v3.6: fire.toApiCourts normalizes user-facing court_pref/courts to API ids', () => {
+  assert.deepEqual(fire.toApiCourts({ court_pref: '4', courts: ['4'] }), ['5']);
+  assert.deepEqual(fire.toApiCourts({ court_pref: '5', courts: ['5'] }), ['6']);
+  assert.deepEqual(fire.toApiCourts({ court_pref: '6', courts: ['6'] }), ['7']);
+  assert.deepEqual(
+    fire.toApiCourts({ court_pref: '4', courts: ['4', '5', '6'] }),
+    ['5', '6', '7'],
+    'preferred API id first, then ascending fallback in API terms'
+  );
+  assert.deepEqual(
+    fire.toApiCourts({ court_pref: '5', courts: ['5', '4', '6'] }),
+    ['6', '5', '7'],
+    'preferred first, then rest in source order'
+  );
+  assert.deepEqual(
+    fire.toApiCourts({ court_pref: '4', courts: [] }),
+    ['5'],
+    'empty courts still returns the preferred API id'
+  );
+});
+
+test('v3.6: fire.stashFireContext / popFireContext round-trip', () => {
+  const rid = 999999;
+  fire.dropFireContext(rid);
+  assert.equal(fire.popFireContext(rid), null);
+  const ctx = { recurring: { id: rid }, targetMs: 12345, slot: { date: '2026-07-15', from: 38, to: 40 }, apiCourts: ['5', '6', '7'] };
+  fire.stashFireContext(rid, ctx);
+  const popped = fire.popFireContext(rid);
+  assert.ok(popped, 'pop should return the stashed context');
+  assert.equal(popped.targetMs, 12345);
+  assert.equal(fire.popFireContext(rid), null, 'second pop should return null (consumed)');
+  fire.dropFireContext(rid);
+});
+
+test('v3.6: fire.peekFireContext does not consume', () => {
+  const rid = 999998;
+  fire.dropFireContext(rid);
+  const ctx = { recurring: { id: rid }, targetMs: 999 };
+  fire.stashFireContext(rid, ctx);
+  const a = fire.peekFireContext(rid);
+  const b = fire.peekFireContext(rid);
+  const c = fire.popFireContext(rid);
+  assert.ok(a && b && c);
+  assert.equal(a.targetMs, 999);
+  assert.equal(b.targetMs, 999);
+  assert.equal(c.targetMs, 999);
+  fire.dropFireContext(rid);
+});
+
+test('v3.6: fire context TTL constant is set to a sensible window', () => {
+  // We can't easily mock Date.now() to test TTL expiry, so we just verify
+  // the constant is non-zero and well above the fire path's worst-case
+  // execution time (a few hundred ms).
+  assert.equal(typeof fire.FIRE_CONTEXT_TTL_MS, 'number');
+  assert.ok(fire.FIRE_CONTEXT_TTL_MS >= 60_000, 'TTL should be at least 1 minute');
+  assert.ok(fire.FIRE_CONTEXT_TTL_MS <= 10 * 60_000, 'TTL should not exceed 10 minutes');
+});
+
+test('v3.6: repo.bookings.create accepts booked_unverified status', () => {
+  const a = repo.accounts.create({ label: 'v36a', username: 'v36a', password: 'p' });
+  const b = repo.bookings.create({
+    account_id: a.id, court: '5', date: '2026-07-15', start_time: '19:00', end_time: '20:00',
+    status: 'booked_unverified', external_id: null, raw_json: { message: 'Your booking has been made.', status: 200 },
+  });
+  assert.equal(b.status, 'booked_unverified');
+  assert.equal(b.external_id, null);
+  repo.accounts.remove(a.id);
+});
+
+test('v3.6: repo.bookings.listUnverified finds unverified rows older than threshold', () => {
+  const a = repo.accounts.create({ label: 'v36b', username: 'v36b', password: 'p' });
+  // Recent (within 30s window) — should NOT be picked up
+  const recent = repo.bookings.create({
+    account_id: a.id, court: '5', date: '2026-07-15', start_time: '19:00', end_time: '20:00',
+    status: 'booked_unverified', external_id: null,
+  });
+  // Old (manually set created_at to 60s ago) — SHOULD be picked up
+  const old = repo.bookings.create({
+    account_id: a.id, court: '5', date: '2026-07-15', start_time: '19:00', end_time: '20:00',
+    status: 'booked_unverified', external_id: null,
+  });
+  const db = require('../src/db');
+  db.get().prepare(`UPDATE bookings SET created_at = ? WHERE id = ?`).run(new Date(Date.now() - 60_000).toISOString(), old.id);
+
+  const pending = repo.bookings.listUnverified({ olderThanMs: 30_000 });
+  const ids = pending.map(p => p.id);
+  assert.ok(ids.includes(old.id), `expected old unverified booking ${old.id} in list, got ${JSON.stringify(ids)}`);
+  assert.ok(!ids.includes(recent.id), `recent unverified should NOT be in list`);
+
+  repo.bookings.markVerified(old.id, '99999');
+  const verified = repo.bookings.get(old.id);
+  assert.equal(verified.status, 'confirmed');
+  assert.equal(verified.external_id, '99999');
+  repo.accounts.remove(a.id);
+});
+
+test('v3.6: monitor.reconcileUnverifiedBookings is a no-op when no pending bookings', async () => {
+  // Clean slate — any unverified from previous tests would be picked up
+  for (const a of repo.accounts.list()) {
+    for (const b of repo.bookings.list({})) {
+      if (b.account_id === a.id && b.status === 'booked_unverified') {
+        // leave for the test below; nothing to clean
+      }
+    }
+  }
+  // Make sure none are old enough
+  const a = repo.accounts.create({ label: 'v36c', username: 'v36c', password: 'p' });
+  const monitor = require('../src/agent/monitor');
+  // No bookings at all → no work
+  const r = await monitor.reconcileUnverifiedBookings({ olderThanMs: 30_000 });
+  assert.equal(r.checked, 0);
+  assert.equal(r.confirmed, 0);
+  repo.accounts.remove(a.id);
+});
+
+test('v3.6: scheduler.isFiring reflects in_flight set', () => {
+  const scheduler = require('../src/agent/scheduler');
+  // The exported function should be callable
+  assert.equal(typeof scheduler.isFiring, 'function');
+  // No fire in flight for a random id
+  assert.equal(scheduler.isFiring(123456789), false);
+});
+
+test('v3.6: fire.fireScheduledFromContext — happy path (mocked client)', async () => {
+  // We mock just enough of KoorooClient to verify the result plumbing.
+  // The mock client.createBooking returns a "booked" response; the real
+  // flow is exercised against the live server in the smoke test.
+  const rid = 999996;
+  fire.dropFireContext(rid);
+  // state.transition needs a real account row, so create one
+  const fakeAccount = repo.accounts.create({ label: 'mock-fp', username: 'mockfp', password: 'x' });
+  const mockClient = {
+    account: fakeAccount,
+    userId: '76',
+    contactId: '10001891',
+    jar: { getCookiesSync: () => [] },
+    cookieHeader: () => '',
+    createBooking: async () => ({
+      status: 200,
+      body: { message: 'Your booking has been made.', status: 200, data2: { resourceId: 'C4' } },
+      raw: '{"message":"Your booking has been made.","status":200}',
+    }),
+    getDaySchedule: async () => ({ status: 200, body: { bookings: [] } }),
+  };
+  const ctx = {
+    recurring: { id: 1, account_id: fakeAccount.id, label: 'mock' },
+    client: mockClient,
+    account: fakeAccount,
+    targetMs: Date.now(),
+    slot: { date: '2026-07-15', from: 38, to: 40 },
+    apiPref: '5',
+    apiCourts: ['5', '6', '7'],
+    userId: '76',
+    contactId: '10001891',
+  };
+  fire.stashFireContext(rid, ctx);
+
+  const popped = fire.popFireContext(rid);
+  const result = await fire.fireScheduledFromContext({ ctx: popped });
+  assert.equal(result.category.code, 'booked');
+  assert.equal(result.courtId, '5');
+  assert.equal(result.courtIdx, 0, 'booked on first (preferred) court');
+  fire.dropFireContext(rid);
+  repo.accounts.remove(fakeAccount.id);
+});
+
+test('v3.6: fire.fireScheduledFromContext — falls through to fallback court', async () => {
+  const rid = 999995;
+  fire.dropFireContext(rid);
+  const fakeAccount = repo.accounts.create({ label: 'mock-fb', username: 'mockfb', password: 'x' });
+  let callCount = 0;
+  const mockClient = {
+    account: fakeAccount,
+    userId: '76',
+    contactId: '10001891',
+    jar: { getCookiesSync: () => [] },
+    cookieHeader: () => '',
+    createBooking: async ({ court_id }) => {
+      callCount++;
+      if (court_id === '5') return { status: 404, body: { message: 'Please reserve a different court. This one is already booked by a member.', status: 404 }, raw: '{}' };
+      return { status: 200, body: { message: 'Your booking has been made.', status: 200 }, raw: '{}' };
+    },
+    getDaySchedule: async () => ({ status: 200, body: { bookings: [] } }),
+  };
+  const ctx = {
+    recurring: { id: 2, account_id: fakeAccount.id, label: 'mock2' },
+    client: mockClient,
+    account: fakeAccount,
+    targetMs: Date.now(),
+    slot: { date: '2026-07-15', from: 38, to: 40 },
+    apiPref: '5',
+    apiCourts: ['5', '6', '7'],
+    userId: '76',
+    contactId: '10001891',
+  };
+  fire.stashFireContext(rid, ctx);
+  const popped = fire.popFireContext(rid);
+  const result = await fire.fireScheduledFromContext({ ctx: popped });
+  assert.equal(result.category.code, 'booked');
+  assert.equal(result.courtId, '6', 'booked on the fallback court (6)');
+  assert.equal(result.courtIdx, 1, 'fallback index');
+  assert.equal(callCount, 2, 'should have tried preferred then fallback');
+  fire.dropFireContext(rid);
+  repo.accounts.remove(fakeAccount.id);
+});
+
+test('v3.6: recordAndPersistScheduledFire — booked_unverified when findBookingFor returns null', async () => {
+  const a = repo.accounts.create({ label: 'v36rec', username: 'v36rec', password: 'p' });
+  const r = recurring.add({ account_id: a.id, label: 'unv', day_of_week: 3, time: '19:00', court_pref: '4', duration_mins: 60 });
+  const ctx = {
+    recurring: r,
+    client: {
+      account: a,
+      userId: '76',
+      contactId: '10001891',
+      getDaySchedule: async () => ({ status: 200, body: { bookings: [] } }),  // empty — no match
+    },
+    account: a,
+    targetMs: Date.now(),
+    slot: { date: '2026-07-15', from: 38, to: 40 },
+    apiPref: '5',
+    apiCourts: ['5', '6', '7'],
+    userId: '76',
+    contactId: '10001891',
+  };
+  const fakeResult = {
+    status: 200,
+    body: { message: 'Your booking has been made.', status: 200 },
+    raw: '{"message":"Your booking has been made.","status":200}',
+    latency_ms: 50,
+    courtId: '5',
+    courtIdx: 0,
+    category: { code: 'booked' },
+    firedAt: new Date().toISOString(),
+    ctx,
+  };
+  const out = await fire.recordAndPersistScheduledFire({ ctx, result: fakeResult });
+  assert.equal(out.booking.status, 'booked_unverified', 'should be booked_unverified when findBookingFor returns null');
+  assert.equal(out.booking.external_id, null);
+  // And the recurring's setLastResult should still report 'booked' (the fire
+  // succeeded on the server's side; the reconciliation job will eventually
+  // flip the booking row to 'confirmed' when external_id is filled in).
+  const after = repo.recurring.get(r.id);
+  assert.equal(after.last_status, 'booked');
+
+  // Verify the booking is now in the unverified list (after the cutoff).
+  // We use olderThanMs: -1000 so the just-created booking is in the list
+  // (the cutoff becomes a future timestamp, matching all past rows).
+  const pending = repo.bookings.listUnverified({ olderThanMs: -1000 });
+  assert.ok(pending.find(p => p.id === out.booking.id), 'unverified booking should appear in listUnverified');
+
+  // markVerified flips status and sets external_id
+  repo.bookings.markVerified(out.booking.id, '12345');
+  const verified = repo.bookings.get(out.booking.id);
+  assert.equal(verified.status, 'confirmed');
+  assert.equal(verified.external_id, '12345');
+  repo.accounts.remove(a.id);
+});
+
 // ---- v3.5: booking target + non-recurring one-shot watches ----
 
 test('v3.5: scheduler.nextBookingTarget — returns the slot the next fire will book', () => {

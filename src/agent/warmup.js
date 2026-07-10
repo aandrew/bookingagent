@@ -5,6 +5,8 @@ const { KoorooClient } = require('../kooroo/client');
 const endpoints = require('../kooroo/endpoints.json');
 const state = require('./state');
 const log = require('../logger');
+const time = require('./time');
+const fire = require('./fire');
 
 const primed = new Map(); // accountId -> { headers, body, expiresAt, builtAt }
 
@@ -107,4 +109,44 @@ function clearPrimed(accountId) {
   primed.delete(accountId);
 }
 
-module.exports = { warm, getPrimed, clearPrimed, ensureFreshSession, buildPrebuiltRequest, parseCookieExpiry };
+// Build and stash a complete "fire-ready" context for a recurring. Runs at
+// T-leadMs so the fire path at T is just a setTimeout-aligned POST with no
+// further async setup work.
+async function prepareForFire(rec, fireMs) {
+  if (!rec || !rec.account_id) throw new Error('prepareForFire: missing recurring');
+  const slot = require('./scheduler').slotForFire(rec, fireMs);
+  const client = await ensureFreshSession(rec.account_id);
+  const apiPref = fire.toApiCourts(rec)[0];
+  const apiCourts = fire.toApiCourts(rec);
+  const entry = primed.get(rec.account_id);
+  const userId = client.userId;
+  const contactId = client.contactId;
+  if (!userId) throw new Error('prepareForFire: client has no userId after ensureFreshSession');
+  const ctx = {
+    recurring: { ...rec, courts: rec.courts },
+    client,
+    account: repo.accounts.get(rec.account_id),
+    targetMs: fireMs,
+    slot,
+    apiPref,
+    apiCourts,
+    userId,
+    contactId,
+    prebuilt: {
+      action: endpoints.api.actions.createBooking.name,
+      date: slot.date,
+      from: String(slot.from),
+      to: String(slot.to),
+      user_id: String(userId),
+      first_day_of_week: '',
+      last_day_of_week: '',
+    },
+    preparedAt: Date.now(),
+  };
+  fire.stashFireContext(rec.id, ctx);
+  state.transition(rec.account_id, state.STATES.PRIMED, `staged fire ctx for ${slot.date} ${slot.from}-${slot.to} courts ${apiCourts.join(',')}`);
+  log.info('warmup.fireContext.stashed', { recurring: rec.id, account: rec.account_id, targetMs: fireMs, slot, apiCourts });
+  return ctx;
+}
+
+module.exports = { warm, getPrimed, clearPrimed, ensureFreshSession, buildPrebuiltRequest, parseCookieExpiry, prepareForFire };

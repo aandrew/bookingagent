@@ -13,7 +13,12 @@ const { KoorooClient } = require('../kooroo/client');
 const { timeToSlot, slotToTime } = require('../kooroo/client');
 
 const timers = new Map(); // recurringId -> { sessionCheckTimer, warmTimer, fireTimer }
+const inFlight = new Set(); // recurringId -> fire currently executing
 const SESSION_LEAD_MS = 7 * 24 * 3600_000;  // 7 days
+
+function isFiring(recurringId) { return inFlight.has(recurringId); }
+function markFiring(recurringId) { inFlight.add(recurringId); }
+function clearFiring(recurringId) { inFlight.delete(recurringId); }
 
 function clearTimers(id) {
   const t = timers.get(id);
@@ -51,64 +56,87 @@ function slotForFire(rec, fireMs) {
 }
 
 async function prepareForFire(rec, fireMs) {
-  const courts = JSON.parse(rec.courts || '[]');
-  const pref = rec.court_pref;
-  const apiPref = recurring.COURT_TO_API[pref];
-  const slot = slotForFire(rec, fireMs);
-  const primed = await warmup.warm(rec.account_id, {
-    date: slot.date, from: slot.from, to: slot.to, courtId: apiPref,
-  });
-  return { courts, pref, apiPref, fireMs, slot, primed };
+  // Kept for backward compat with call sites that still want the
+  // full prepared context. New code should call warmup.prepareForFire
+  // directly (which stashes a fire-ready context keyed by recurringId).
+  return warmup.prepareForFire(rec, fireMs);
 }
 
 async function executeScheduledBooking(rec, fireMs) {
-  log.info('scheduler.fire', { recurring: rec.id, label: rec.label, fireMs });
-  let prepared;
-  try {
-    prepared = await prepareForFire(rec, fireMs);
-  } catch (e) {
-    log.error('scheduler.fire.prepare', { recurring: rec.id, error: e.message });
-    repo.recurring.setLastResult(rec.id, { status: 'login_required', msg: e.message, category: 'technical_error' });
-    state.transition(rec.account_id, state.STATES.LOGIN_REQUIRED, e.message);
+  if (isFiring(rec.id)) {
+    log.warn('scheduler.fire.duplicate', { recurring: rec.id });
     return;
   }
-  const { courts, apiPref, fireMs: fm, slot, primed } = prepared;
-  // Wait for the exact fire millisecond
-  await time.waitUntilExact(fm);
-  const account = repo.accounts.get(rec.account_id);
-  const client = new KoorooClient(account);
-  await client.hydrateFromSession();
-  const result = await fire.fireScheduled({ recurring: { ...rec, courts }, targetMs: fm, client, primed });
-  await fire.recordAndPersistScheduledFire({ recurring: { ...rec, courts }, targetMs: fm, client, primed, result });
-  recurring.chainToNextWeek(rec.id);
-  repo.recurring.update(rec.id, { first_occurrence_action: 'resolved' });
+  markFiring(rec.id);
+  log.info('scheduler.fire', { recurring: rec.id, label: rec.label, fireMs });
+  try {
+    let ctx = fire.popFireContext(rec.id);
+    if (!ctx) {
+      log.warn('scheduler.fire.noContext.fallback', { recurring: rec.id, fireMs });
+      try {
+        ctx = await warmup.prepareForFire(rec, fireMs);
+      } catch (e) {
+        log.error('scheduler.fire.prepare', { recurring: rec.id, error: e.message });
+        repo.recurring.setLastResult(rec.id, { status: 'login_required', msg: e.message, category: 'technical_error' });
+        state.transition(rec.account_id, state.STATES.LOGIN_REQUIRED, e.message);
+        return;
+      }
+    }
+    await time.waitUntilExact(fireMs);
+    const result = await fire.fireScheduledFromContext({
+      ctx,
+      onAttempt: ({ courtId, idx }) => {
+        repo.fireEvents.create({
+          recurring_id: rec.id, account_id: rec.account_id,
+          scheduled_at: new Date(fireMs).toISOString(),
+          status: 'attempting', attempt: 1, court_attempted: courtId,
+          date: ctx.slot.date, time: slotToTime(ctx.slot.from),
+        });
+      },
+    });
+    await fire.recordAndPersistScheduledFire({ ctx, result });
+    recurring.chainToNextWeek(rec.id);
+    repo.recurring.update(rec.id, { first_occurrence_action: 'resolved' });
+  } catch (e) {
+    log.error('scheduler.fire.error', { recurring: rec.id, error: e.message });
+  } finally {
+    clearFiring(rec.id);
+  }
   schedule(rec.id);
 }
 
 async function executeImmediateBooking(rec) {
-  log.info('scheduler.immediate', { recurring: rec.id, label: rec.label });
-  // The immediate path: use the next_fire_at directly as the target slot
-  const fireMs = nextFireUtcMs(rec) || Date.now();
-  let prepared;
-  try {
-    prepared = await prepareForFire(rec, fireMs);
-  } catch (e) {
-    log.error('scheduler.immediate.prepare', { recurring: rec.id, error: e.message });
-    repo.recurring.setLastResult(rec.id, { status: 'login_required', msg: e.message, category: 'technical_error' });
-    state.transition(rec.account_id, state.STATES.LOGIN_REQUIRED, e.message);
+  if (isFiring(rec.id)) {
+    log.warn('scheduler.immediate.duplicate', { recurring: rec.id });
     return;
   }
-  const { courts, apiPref, slot, primed } = prepared;
-  const account = repo.accounts.get(rec.account_id);
-  const client = new KoorooClient(account);
-  await client.hydrateFromSession();
-  await fire.fireImmediate({
-    recurring: { ...rec, courts },
-    client,
-    primed: { date: slot.date, from: slot.from, to: slot.to, courtId: apiPref },
-  });
-  recurring.chainToNextWeek(rec.id);
-  repo.recurring.update(rec.id, { first_occurrence_action: 'resolved' });
+  markFiring(rec.id);
+  log.info('scheduler.immediate', { recurring: rec.id, label: rec.label });
+  const fireMs = nextFireUtcMs(rec) || Date.now();
+  try {
+    let ctx = fire.popFireContext(rec.id);
+    if (!ctx) {
+      try {
+        ctx = await warmup.prepareForFire(rec, fireMs);
+      } catch (e) {
+        log.error('scheduler.immediate.prepare', { recurring: rec.id, error: e.message });
+        repo.recurring.setLastResult(rec.id, { status: 'login_required', msg: e.message, category: 'technical_error' });
+        state.transition(rec.account_id, state.STATES.LOGIN_REQUIRED, e.message);
+        return;
+      }
+    }
+    await fire.fireImmediate({
+      recurring: ctx.recurring,
+      client: ctx.client,
+      primed: { date: ctx.slot.date, from: ctx.slot.from, to: ctx.slot.to, courtId: ctx.apiPref },
+    });
+    recurring.chainToNextWeek(rec.id);
+    repo.recurring.update(rec.id, { first_occurrence_action: 'resolved' });
+  } catch (e) {
+    log.error('scheduler.immediate.error', { recurring: rec.id, error: e.message });
+  } finally {
+    clearFiring(rec.id);
+  }
   schedule(rec.id);
 }
 
@@ -147,11 +175,10 @@ function schedule(recurringId) {
   const warmDelta = Math.max(1000, delta - leadMs);
   const warmTimer = setTimeout(() => {
     const fireMs = nextUtc;
-    const slot = slotForFire(rec, fireMs);
-    warmup.warm(rec.account_id, {
-      date: slot.date, from: slot.from, to: slot.to,
-      courtId: recurring.COURT_TO_API[rec.court_pref],
-    }).catch(e => log.error('scheduler.warm.error', { recurring: recurringId, error: e.message }));
+    const fresh = repo.recurring.get(recurringId);
+    if (!fresh || !fresh.enabled) return;
+    warmup.prepareForFire(fresh, fireMs)
+      .catch(e => log.error('scheduler.warm.error', { recurring: recurringId, error: e.message }));
   }, warmDelta);
   const fireTimer = setTimeout(() => {
     executeScheduledBooking(rec, nextUtc).catch(e => log.error('scheduler.fire.error', { recurring: recurringId, error: e.message }));
@@ -216,7 +243,7 @@ function nextBookingTarget(rec) {
   return slotForFire(rec, fireMs);
 }
 
-module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, nextBookingTarget, SESSION_LEAD_MS };
+module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, nextBookingTarget, prepareForFire, isFiring, SESSION_LEAD_MS };
 // backward-compat aliases
 module.exports.executeImmediateFire = module.exports.executeImmediateBooking;
 module.exports.executeScheduledFire = module.exports.executeScheduledBooking;

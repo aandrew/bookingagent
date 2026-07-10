@@ -11,6 +11,7 @@ const monitor = require('./monitor');
 let auditTask;
 let backupTask;
 let dueWatchesTask;
+let reconcileTask;
 
 function start() {
   // Sub-second scheduler for recurring bookings
@@ -30,6 +31,21 @@ function start() {
       }
     });
     log.info('cron.fire-due-watches.started', {});
+  }
+  // v3.6: every 30s, reconcile any "booked_unverified" bookings — bookings
+  // where the server said "booked" but our immediate day-schedule lookup
+  // didn't see the new row. We re-fetch and fill in external_id so the
+  // user can manage/cancel the booking.
+  if (!reconcileTask) {
+    reconcileTask = cron.schedule('*/30 * * * * *', async () => {
+      try {
+        const r = await monitor.reconcileUnverifiedBookings();
+        if (r.confirmed > 0) log.info('cron.reconcile', r);
+      } catch (e) {
+        log.error('cron.reconcile.error', { error: e.message });
+      }
+    });
+    log.info('cron.reconcile.started', {});
   }
   // Daily audit prune at 03:00
   if (!auditTask) {
@@ -65,10 +81,10 @@ function start() {
 
 function stop() {
   scheduler.stop();
-  for (const t of [dueWatchesTask, auditTask, backupTask]) {
+  for (const t of [dueWatchesTask, auditTask, backupTask, reconcileTask]) {
     try { t?.stop?.(); } catch {}
   }
-  dueWatchesTask = auditTask = backupTask = undefined;
+  dueWatchesTask = auditTask = backupTask = reconcileTask = undefined;
   pool.shutdown();
 }
 
