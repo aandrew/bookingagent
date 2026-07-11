@@ -212,7 +212,7 @@ router.post('/bookings/:id/cancel', requireAdmin, async (req, res) => {
     const r = await booker.cancel(parseInt(req.params.id, 10));
     res.json(r);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

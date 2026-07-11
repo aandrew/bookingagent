@@ -81,10 +81,11 @@
         <td><%= b.court %></td>
         <td>
           <% if (b.status === 'confirmed') { %><span class="pill ok">confirmed</span>
-          <% } else if (b.status === 'cancelled') { %><span class="pill warn">cancelled</span>
+          <% } else if (b.status === 'booked_unverified') { %><span class="pill warn" title="Booked on the server, awaiting external_id from reconciliation">unverified</span>
+          <% } else if (b.status === 'cancelled') { %><span class="pill">cancelled</span>
           <% } else { %><span class="pill err"><%= b.status %></span><% } %>
         </td>
-        <td class="muted"><%= b.external_id || '' %></td>
+        <td class="muted"><%= b.external_id || (b.status === 'booked_unverified' ? '…' : '') %></td>
       </tr>
     <% }) %>
     <% if (!bookings.length) { %><tr><td colspan="6" class="muted">No bookings yet.</td></tr><% } %>

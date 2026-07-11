@@ -590,6 +590,25 @@ test('v3.4: chainToNextWeek — next fire is at the just-booked slot time (the n
 
 // ---- v3.6: booked_unverified + reconciliation + fire context ----
 
+test('v3.6: booker.cancel refuses to cancel a booking with no external_id', async () => {
+  const a = repo.accounts.create({ label: 'v36cancel', username: 'v36cancel', password: 'p' });
+  const b = repo.bookings.create({
+    account_id: a.id, court: '5', date: '2026-07-15', start_time: '19:00', end_time: '20:00',
+    status: 'booked_unverified', external_id: null,
+  });
+  const booker = require('../src/agent/booker');
+  let err = null;
+  try { await booker.cancel(b.id); } catch (e) { err = e; }
+  assert.ok(err, 'cancel should throw');
+  assert.equal(err.status, 409);
+  assert.ok(/no external_id/i.test(err.message), `error message should mention no external_id, got: ${err.message}`);
+  // The booking should not have been touched
+  const after = repo.bookings.get(b.id);
+  assert.equal(after.status, 'booked_unverified');
+  assert.equal(after.external_id, null);
+  repo.accounts.remove(a.id);
+});
+
 test('v3.6: fire.toApiCourts normalizes user-facing court_pref/courts to API ids', () => {
   assert.deepEqual(fire.toApiCourts({ court_pref: '4', courts: ['4'] }), ['5']);
   assert.deepEqual(fire.toApiCourts({ court_pref: '5', courts: ['5'] }), ['6']);

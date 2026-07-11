@@ -42,15 +42,18 @@
         <td><%= b.date %> <%= b.start_time %>–<%= b.end_time %></td>
         <td><%= b.court || '' %></td>
         <td>
-          <% if (b.status === 'confirmed') { %><span class="pill ok"><%= b.status %></span>
-          <% } else if (b.status === 'cancelled') { %><span class="pill warn"><%= b.status %></span>
+          <% if (b.status === 'confirmed') { %><span class="pill ok">confirmed</span>
+          <% } else if (b.status === 'booked_unverified') { %><span class="pill warn" title="Booked on the server, awaiting external_id from reconciliation">unverified</span>
+          <% } else if (b.status === 'cancelled') { %><span class="pill">cancelled</span>
           <% } else { %><span class="pill err"><%= b.status %></span><% } %>
         </td>
-        <td class="muted"><%= b.external_id || '' %></td>
+        <td class="muted"><%= b.external_id || (b.status === 'booked_unverified' ? '…' : '') %></td>
         <td class="muted"><%= b.created_at %></td>
         <td>
           <% if (b.status === 'confirmed') { %>
             <button class="danger" onclick="cancelBooking(<%= b.id %>)">Cancel</button>
+          <% } else if (b.status === 'booked_unverified') { %>
+            <span class="muted" title="Wait for the 30s reconciliation job to fill external_id, then this button will appear">reconciling…</span>
           <% } %>
         </td>
       </tr>
