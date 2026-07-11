@@ -105,6 +105,18 @@ router.post('/watches', requireAdmin, async (req, res) => {
   const w = req.body || {};
   if (!w.account_id) return res.status(400).json({ error: 'account_id is required' });
   if (!w.date_from) return res.status(400).json({ error: 'date is required (YYYY-MM-DD)' });
+  // v3.6: validate date_from format. Previously an invalid date would
+  // silently default to strategy='scheduled' (NaN from new Date → diffDays
+  // = NaN → NaN <= 7 is false) and the watcher would never fire. The
+  // user would notice the watcher sitting there with fired_at=null.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(w.date_from))) {
+    return res.status(400).json({ error: 'date_from must be a valid date in YYYY-MM-DD format' });
+  }
+  // Verify it's a real calendar date (catches "2026-02-30" etc).
+  const probeDate = new Date(String(w.date_from) + 'T00:00:00Z');
+  if (isNaN(probeDate.getTime()) || probeDate.toISOString().slice(0, 10) !== w.date_from) {
+    return res.status(400).json({ error: `date_from is not a real calendar date: ${w.date_from}` });
+  }
   if (!w.time_start) return res.status(400).json({ error: 'time_start is required (HH:MM, Sydney)' });
   if (!w.duration_mins) return res.status(400).json({ error: 'duration_mins is required' });
   // Auto-detect strategy:

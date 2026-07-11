@@ -30,33 +30,35 @@
 
 <div class="panel">
   <h2>Accounts</h2>
-  <table>
-    <thead><tr><th>Label</th><th>User</th><th>State</th><th>Session</th><th>Enabled</th><th></th></tr></thead>
-    <tbody>
-    <% accounts.forEach(function(a) { const s = sessionsById[a.id]; %>
-      <tr>
-        <td><%= a.label %></td>
-        <td><%= a.username %></td>
-        <td>
-            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(a.state)) cls='err'; else if (['primed','attempting','first_immediate'].includes(a.state)) cls='warn'; else if (['token_ready','tested_ok'].includes(a.state)) cls='info'; %>
-          <span class="pill <%= cls %>"><%= a.state || 'waiting' %></span>
-          <% if (a.state_msg) { %><div class="muted" style="font-size:11px;"><%= a.state_msg %></div><% } %>
-          <% if (a.session_expires_at) { %><div class="muted" style="font-size:11px;">session expires: <%= a.session_expires_at %></div><% } %>
-        </td>
-        <td>
-          <% if (s) { %><span class="pill ok">stored</span> <span class="muted">updated <%= s.updated_at %></span>
-          <% } else { %><span class="pill warn">none</span><% } %>
-        </td>
-        <td><%= a.enabled ? 'yes' : 'no' %></td>
-        <td>
-          <button class="secondary" onclick="relogin(<%= a.id %>)" title="Re-run the Playwright login to refresh the stored session">Re-login</button>
-          <button class="secondary" onclick="probe(<%= a.id %>)" title="Quick HTTP probe of the stored session (no browser)">Probe</button>
-          <button class="danger" onclick="removeAccount(<%= a.id %>)">Delete</button>
-        </td>
-      </tr>
-    <% }) %>
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Label</th><th>User</th><th>State</th><th>Session</th><th>Enabled</th><th></th></tr></thead>
+      <tbody>
+      <% accounts.forEach(function(a) { const s = sessionsById[a.id]; %>
+        <tr>
+          <td><%= a.label %></td>
+          <td><%= a.username %></td>
+          <td>
+              <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(a.state)) cls='err'; else if (['primed','attempting'].includes(a.state)) cls='warn'; else if (['token_ready','tested_ok'].includes(a.state)) cls='info'; %>
+            <span class="pill <%= cls %>"><%= a.state || 'waiting' %></span>
+            <% if (a.state_msg) { %><div class="muted truncate" style="font-size:11px; max-width: 260px;" title="<%= a.state_msg %>"><%= a.state_msg %></div><% } %>
+            <% if (a.session_expires_at) { %><div class="muted" style="font-size:11px;">session expires: <%= a.session_expires_at %></div><% } %>
+          </td>
+          <td data-hide-sm="1">
+            <% if (s) { %><span class="pill ok">stored</span> <span class="muted">updated <%= s.updated_at %></span>
+            <% } else { %><span class="pill warn">none</span><% } %>
+          </td>
+          <td data-hide-sm="1"><%= a.enabled ? 'yes' : 'no' %></td>
+          <td>
+            <button class="secondary" onclick="relogin(<%= a.id %>)" title="Re-run the Playwright login to refresh the stored session">Re-login</button>
+            <button class="secondary" onclick="probe(<%= a.id %>)" title="Quick HTTP probe of the stored session (no browser)">Probe</button>
+            <button class="danger" onclick="removeAccount(<%= a.id %>)">Delete</button>
+          </td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <script>

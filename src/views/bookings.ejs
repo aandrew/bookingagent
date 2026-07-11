@@ -38,7 +38,7 @@
     <% bookings.forEach(function(b) { %>
       <tr>
         <td><%= b.id %></td>
-        <td>#<%= b.account_id %></td>
+        <td><%= b.account_username || b.account_label || ('#' + b.account_id) %></td>
         <td><%= b.date %> <%= b.start_time %>–<%= b.end_time %></td>
         <td><%= b.court || '' %></td>
         <td>

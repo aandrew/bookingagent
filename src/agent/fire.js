@@ -64,6 +64,14 @@ function categorize({ status, body, error }) {
     const m = body.message;
     if (/already booked by a member/i.test(m))
       return { code: 'no_time_available', reason: 'already_booked' };
+    // v3.6: user-side quota — the member has already booked the maximum
+    // number of hours they're allowed today (e.g. they booked other
+    // slots directly on the Koorora site). This is NOT a "slot taken
+    // by someone else" — retrying won't help until the user frees up
+    // their quota. We tag it distinctly so the dashboard / SQL can
+    // tell it apart from real "slot taken" cases.
+    if (/over the maximum number of hours|push you over|max.*hours.*day|quota|hour limit/i.test(m))
+      return { code: 'no_time_available', reason: 'user_quota_exceeded', detail: m };
     if (/does not exist/i.test(m))
       return { code: 'technical_error', reason: 'court_invalid', detail: m };
     if (/cannot be made yet|wait until the time is allowed/i.test(m))
@@ -207,7 +215,10 @@ async function recordAndPersistScheduledFire({ ctx, result, onAttempt }) {
   repo.recurring.setLastResult(rec.id, {
     status: cat.code,
     msg: cat.detail || cat.reason,
-    category: cat.code === 'booked' ? null : (cat.code === 'no_time_available' ? 'no_time_available' : 'technical_error'),
+    // v3.6: prefer the specific reason (e.g. 'user_quota_exceeded',
+    // 'already_booked') over the coarse code. Only fall back to the
+    // code-derived category for 'booked' (null) and unrecognized cases.
+    category: cat.code === 'booked' ? null : (cat.reason || (cat.code === 'no_time_available' ? 'no_time_available' : 'technical_error')),
   });
   return { category: cat, externalId, result, booking };
 }
@@ -279,7 +290,11 @@ async function fireImmediate({ recurring: rec, client, primed, onProgress }) {
   }
   if (!booked) {
     const lastCat = attempts[attempts.length - 1]?.category;
-    const category = lastCat?.code === 'no_time_available' ? 'no_time_available' : 'technical_error';
+    // v3.6: prefer the specific reason over the coarse code (so
+    // 'user_quota_exceeded' shows up as its own category, not as
+    // a generic 'no_time_available').
+    const category = lastCat?.code === 'booked' ? null
+      : lastCat?.reason || (lastCat?.code === 'no_time_available' ? 'no_time_available' : 'technical_error');
     const msg = '3 bookings failed to succeed';
     repo.recurring.setLastResult(rec.id, { status: 'failed', msg, category });
     state.transition(rec.account_id, state.STATES.FAILED, msg);

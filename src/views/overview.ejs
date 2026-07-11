@@ -19,31 +19,34 @@
     if (!auditOrRec || !auditOrRec.account_id) return '—';
     const a = userById[auditOrRec.account_id];
     if (!a) return '#' + auditOrRec.account_id;
-    return format.truncate(a.username, 7);
+    return format.truncate(a.username, 12);
   }
 %>
 
 <div class="row">
   <div class="panel">
     <h2>Upcoming bookings (next 6)</h2>
-    <table>
-      <thead><tr><th>Label</th><th>Account</th><th>Info</th><th>Next attempt</th><th>Action</th></tr></thead>
-      <tbody>
-      <% upcoming.forEach(function(r) { %>
-        <tr>
-          <td><a href="/bookings"><%= r.label %></a>
-            <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
-            <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="Last fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>">on fallback court</span></div><% } %>
-          </td>
-          <td><%= acctCell(r) %></td>
-          <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
-          <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
-          <td><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
-        </tr>
-      <% }) %>
-      <% if (!upcoming.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/make-booking">Make Booking</a>.</td></tr><% } %>
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Label</th><th>Account</th><th data-hide-sm="1">Info</th><th>Next attempt</th><th>Action</th></tr></thead>
+        <tbody>
+        <% upcoming.forEach(function(r) { %>
+          <tr>
+            <td><a href="/bookings"><%= r.label %></a>
+              <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
+              <% if (r.last_error_category === 'user_quota_exceeded') { %><div><span class="pill warn" title="The member has already booked the maximum number of hours they're allowed today on the Koorora site.">user quota exceeded</span></div><% } %>
+              <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="Last fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>">on fallback court</span></div><% } %>
+            </td>
+            <td><%= acctCell(r) %></td>
+            <td class="muted" data-hide-sm="1">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
+            <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
+            <td><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
+          </tr>
+        <% }) %>
+        <% if (!upcoming.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/make-booking">Make Booking</a>.</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
     <% if (totalPages > 1) { %>
       <div class="muted" style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
         <% if (currentPage > 1) { %>
@@ -70,32 +73,38 @@
 
   <div class="panel">
     <h2>Recent booking attempts</h2>
-    <table>
-      <thead><tr><th>Time</th><th>Status</th><th>Court</th><th>Latency</th></tr></thead>
-      <tbody>
-      <% fireEvents.forEach(function(e) { %>
-        <tr>
-          <td class="muted"><%= format.formatSydneyDateTime(e.fired_at || e.scheduled_at) %></td>
-          <td>
-            <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
-            <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
-            <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
-            <% } else { %><span class="pill"><%= e.status %></span><% } %>
-          </td>
-          <td><%= e.court_booked || e.court_attempted || '—' %></td>
-          <td class="muted"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
-        </tr>
-      <% }) %>
-      <% if (!fireEvents.length) { %><tr><td colspan="4" class="muted">No booking attempts yet.</td></tr><% } %>
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Status</th><th>Court</th><th data-hide-sm="1">Latency</th></tr></thead>
+        <tbody>
+        <% fireEvents.forEach(function(e) { %>
+          <tr>
+            <td class="muted"><%= format.formatSydneyDateTime(e.fired_at || e.scheduled_at) %></td>
+            <td>
+              <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
+              <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
+              <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
+              <% } else { %><span class="pill"><%= e.status %></span><% } %>
+            </td>
+            <td><%= e.court_booked || e.court_attempted || '—' %></td>
+            <td class="muted" data-hide-sm="1"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
+          </tr>
+        <% }) %>
+        <% if (!fireEvents.length) { %><tr><td colspan="4" class="muted">No booking attempts yet.</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top: 8px; text-align: right;">
+      <a href="/booking-log" class="muted">All attempts →</a>
+    </div>
   </div>
 </div>
 
 <div class="panel">
   <h2>Accounts</h2>
-  <table>
-    <thead><tr><th>#</th><th>Label</th><th>User</th><th>State</th><th>Last check</th></tr></thead>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Label</th><th>User</th><th>State</th><th data-hide-sm="1">Last check</th></tr></thead>
       <tbody>
       <% accounts.forEach(function(a) { %>
         <tr>
@@ -104,33 +113,40 @@
           <td><%= a.username %></td>
           <td>
             <% var s = a.state || 'waiting'; %>
-            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(s)) cls='err'; else if (['primed','attempting','first_immediate'].includes(s)) cls='warn'; else if (['token_ready','tested_ok'].includes(s)) cls='info'; %>
+            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(s)) cls='err'; else if (['primed','attempting'].includes(s)) cls='warn'; else if (['token_ready','tested_ok'].includes(s)) cls='info'; %>
             <span class="pill <%= cls %>"><%= s %></span>
-            <% if (a.state_msg) { %><div class="muted" style="font-size:11px;"><%= a.state_msg %></div><% } %>
+            <% if (a.state_msg) { %><div class="muted truncate" style="font-size:11px; max-width: 280px;" title="<%= a.state_msg %>"><%= a.state_msg %></div><% } %>
           </td>
-          <td class="muted"><%= a.last_check_at || '—' %></td>
+          <td class="muted" data-hide-sm="1"><%= a.last_check_at || '—' %></td>
         </tr>
       <% }) %>
       </tbody>
     </table>
   </div>
+</div>
 
 <div class="panel">
-  <h2>Recent API calls</h2>
-  <table>
-    <thead><tr><th>Time</th><th>Account</th><th>Method</th><th>URL</th><th>Status</th><th>Latency</th></tr></thead>
-    <tbody>
-    <% recentAudit.forEach(function(a) { %>
-      <tr>
-        <td class="muted"><%= format.formatSydneyDateTime(a.ts) %></td>
-        <td><%= acctCell(a) %></td>
-        <td><%= a.method || '' %></td>
-        <td class="muted"><%= a.url || '' %></td>
-        <td><% if (a.status && a.status >= 400) { %><span class="pill err"><%= a.status %></span><% } else if (a.status) { %><span class="pill ok"><%= a.status %></span><% } else { %><span class="pill"><%= a.error || '' %></span><% } %></td>
-        <td class="muted"><%= a.latency_ms ? a.latency_ms + 'ms' : '' %></td>
-      </tr>
-    <% }) %>
-    </tbody>
-  </table>
+  <h2>Recent API calls (last 10)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Time</th><th>Account</th><th>Method</th><th>URL</th><th>Status</th><th data-hide-sm="1">Latency</th></tr></thead>
+      <tbody>
+      <% recentAudit.forEach(function(a) { %>
+        <tr>
+          <td class="muted"><%= format.formatSydneyDateTime(a.ts) %></td>
+          <td><%= acctCell(a) %></td>
+          <td><%= a.method || '' %></td>
+          <td class="muted truncate" title="<%= a.url || '' %>"><%= a.url || '' %></td>
+          <td><% if (a.status && a.status >= 400) { %><span class="pill err"><%= a.status %></span><% } else if (a.status) { %><span class="pill ok"><%= a.status %></span><% } else { %><span class="pill"><%= a.error || '' %></span><% } %></td>
+          <td class="muted" data-hide-sm="1"><%= a.latency_ms ? a.latency_ms + 'ms' : '' %></td>
+        </tr>
+      <% }) %>
+      <% if (!recentAudit.length) { %><tr><td colspan="6" class="muted">No API calls yet.</td></tr><% } %>
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top: 8px; text-align: right;">
+    <a href="/audit" class="muted">View full audit log →</a>
+  </div>
 </div>
 <%- include('partials/footer') %>

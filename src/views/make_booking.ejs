@@ -49,7 +49,7 @@
             <% for (let h = 1; h <= 12; h++) { %><option value="<%= h %>" <%= h === 7 ? 'selected' : '' %>><%= h %></option><% } %>
           </select>
           <select name="time_minute" id="time_minute" required>
-            <% for (const m of ['00','15','30','45']) { %><option value="<%= m %>" <%= m === '00' ? 'selected' : '' %>><%= m %></option><% } %>
+            <% for (const m of ['00','30']) { %><option value="<%= m %>" <%= m === '00' ? 'selected' : '' %>><%= m %></option><% } %>
           </select>
           <select name="time_ampm" id="time_ampm" required>
             <option value="AM">AM</option>
@@ -167,68 +167,129 @@
     return String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0');
   }
 
+  // v3.6: render result panels using DOM APIs (textContent + element
+  // constructors) instead of innerHTML string concat. The watch.label
+  // and attempt fields come from the server (which in turn reflects
+  // Koorora's hardcoded error messages) — so practical XSS risk is low,
+  // but defence-in-depth: never concatenate untrusted values into HTML.
+  function setText(el, text) { el.textContent = text == null ? '' : String(text); }
+  function p(text, opts) {
+    const el = document.createElement('p');
+    el.style.margin = '4px 0';
+    setText(el, text);
+    if (opts && opts.muted) el.className = 'muted';
+    return el;
+  }
+  function pre(obj) {
+    const el = document.createElement('pre');
+    setText(el, JSON.stringify(obj, null, 2));
+    return el;
+  }
+  function code(text) {
+    const el = document.createElement('code');
+    setText(el, text);
+    return el;
+  }
+  function h3(prefix, labelText) {
+    const el = document.createElement('h3');
+    el.appendChild(document.createTextNode(prefix + ' '));
+    const codeEl = document.createElement('code');
+    setText(codeEl, labelText || '?');
+    el.appendChild(codeEl);
+    return el;
+  }
+  function linkP(text, href) {
+    const el = document.createElement('p');
+    el.style.margin = '4px 0';
+    el.appendChild(document.createTextNode(text + ' '));
+    const a = document.createElement('a');
+    a.href = href;
+    a.textContent = 'Current Bookings';
+    el.appendChild(a);
+    el.appendChild(document.createTextNode('.'));
+    return el;
+  }
+  function clearChildren(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
   // Render a result panel for a one-off booking attempt
   function renderWatchResult(panel, r, watch) {
     const a = r.attempt || { status: 'unknown' };
-    let title, body, cls;
+    let cls, statusIcon, statusWord;
+    if (a.status === 'booked')          { cls = 'ok';   statusIcon = '✓'; statusWord = 'Booking confirmed'; }
+    else if (a.status === 'scheduled')  { cls = 'ok';   statusIcon = '⏱'; statusWord = 'Watcher scheduled'; }
+    else if (a.status === 'no-match')   { cls = 'err';  statusIcon = '⚠'; statusWord = 'No open slot'; }
+    else if (a.status === 'failed')     { cls = 'err';  statusIcon = '✗'; statusWord = 'Booking failed'; }
+    else if (a.status === 'skipped')    { cls = 'err';  statusIcon = '⊘'; statusWord = 'Booking skipped'; }
+    else if (a.status === 'error')      { cls = 'err';  statusIcon = '✗'; statusWord = 'Booking error'; }
+    else                                { cls = 'err';  statusIcon = '?'; statusWord = 'Booking attempt returned status: ' + a.status; }
+    panel.className = 'result-panel ' + cls;
+    clearChildren(panel);
+    panel.appendChild(h3(statusIcon + ' ' + statusWord + ' — label:', watch.label));
     if (a.status === 'booked') {
-      title = '✓ Booking confirmed — label: <code>' + (watch.label || '?') + '</code>';
-      body = '<p style="margin: 4px 0;">Booked on Koorora at ' + (watch.time_start) + ' on ' + watch.date_from + '. Check <a href="/bookings">Current Bookings</a>.</p>'
-        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'ok';
+      const intro = document.createElement('p');
+      intro.style.margin = '4px 0';
+      intro.appendChild(document.createTextNode('Booked on Koorora at ' + (watch.time_start || '') + ' on ' + (watch.date_from || '') + '. Check '));
+      const l = document.createElement('a');
+      l.href = '/bookings';
+      l.textContent = 'Current Bookings';
+      intro.appendChild(l);
+      intro.appendChild(document.createTextNode('.'));
+      panel.appendChild(intro);
+      panel.appendChild(pre(a));
     } else if (a.status === 'scheduled') {
-      title = '⏱ Watcher scheduled — label: <code>' + (watch.label || '?') + '</code>';
-      body = '<p style="margin: 4px 0;">' + (a.reason || 'Date is more than 7 days out. The system will fire this once when the booking window opens.') + '</p>'
-        + '<p class="muted" style="font-size: 12px;">The watcher fires <strong>once</strong> and marks the booking as done — it will not be regularly rescheduled.</p>'
-        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'ok';
+      panel.appendChild(p(a.reason || 'Date is more than 7 days out. The system will fire this once when the booking window opens.'));
+      const note = document.createElement('p');
+      note.className = 'muted';
+      note.style.fontSize = '12px';
+      note.appendChild(document.createTextNode('The watcher fires '));
+      const strong = document.createElement('strong');
+      strong.textContent = 'once';
+      note.appendChild(strong);
+      note.appendChild(document.createTextNode(' and marks the booking as done — it will not be regularly rescheduled.'));
+      panel.appendChild(note);
+      panel.appendChild(pre(a));
     } else if (a.status === 'no-match') {
-      title = '⚠ No open slot for label <code>' + (watch.label || '?') + '</code>';
-      body = '<p style="margin: 4px 0;">Checked ' + (a.candidates ?? 0) + ' slots on ' + watch.date_from + ' — none were open at the requested time. The watcher is marked as fired (one-shot).</p>'
-        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'err';
+      panel.appendChild(p('Checked ' + (a.candidates ?? 0) + ' slots on ' + (watch.date_from || '') + ' — none were open at the requested time. The watcher is marked as fired (one-shot).'));
+      panel.appendChild(pre(a));
     } else if (a.status === 'failed') {
       const errMsg = a.body?.message || a.error || 'unknown';
-      title = '✗ Booking failed for label <code>' + (watch.label || '?') + '</code>';
-      body = '<p style="margin: 4px 0;">Reason: <code>' + errMsg + '</code></p>'
-        + '<p class="muted" style="font-size: 12px;">The watcher is marked as fired. Create a new one if you want to retry.</p>'
-        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'err';
+      const intro = p('Reason:');
+      intro.appendChild(code(errMsg));
+      panel.appendChild(intro);
+      panel.appendChild(p('The watcher is marked as fired. Create a new one if you want to retry.', { muted: true }));
+      panel.appendChild(pre(a));
     } else if (a.status === 'skipped') {
-      title = '⊘ Booking skipped for label <code>' + (watch.label || '?') + '</code>';
-      body = '<p style="margin: 4px 0;">' + (a.error || 'account disabled or missing') + '</p>'
-        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'err';
+      panel.appendChild(p(a.error || 'account disabled or missing'));
+      panel.appendChild(pre(a));
     } else if (a.status === 'error') {
-      title = '✗ Booking error for label <code>' + (watch.label || '?') + '</code>';
-      body = '<p style="margin: 4px 0;">' + (a.error || 'unknown') + '</p>'
-        + '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'err';
+      panel.appendChild(p(a.error || 'unknown'));
+      panel.appendChild(pre(a));
     } else {
-      title = '? Booking attempt returned status: ' + a.status;
-      body = '<pre>' + JSON.stringify(a, null, 2) + '</pre>';
-      cls = 'err';
+      panel.appendChild(pre(a));
     }
-    panel.className = 'result-panel ' + cls;
-    panel.innerHTML = '<h3>' + title + '</h3>' + body;
   }
 
   // Render a result panel for a recurring creation
   function renderRecurringResult(panel, r, label) {
-    let extra = '';
-    if (r.court_auto_allocated && r.original_court_pref) {
-      extra = ' Court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + '.';
-    } else if (r.no_courts_available) {
-      extra = ' NO COURTS AVAILABLE: all 3 courts are taken by this time slot.';
-    } else if (r.first_occurrence_action === 'book_now') {
-      extra = ' First occurrence being attempted now.';
-    }
     let cls = 'ok';
     if (r.last_status === 'failed' && r.last_error_category === 'no_courts_available') cls = 'err';
     panel.className = 'result-panel ' + cls;
-    panel.innerHTML = '<h3>✓ Recurring scheduled — label: <code>' + (r.label || label) + '</code></h3>'
-      + '<p class="muted" style="font-size: 12px; margin: 4px 0;">Every 7 days from the picked date. First fire at the opening (T-7d).' + extra + '</p>'
-      + '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+    clearChildren(panel);
+    panel.appendChild(h3('✓ Recurring scheduled — label:', r.label || label));
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.style.fontSize = '12px';
+    note.style.margin = '4px 0';
+    note.appendChild(document.createTextNode('Every 7 days from the picked date. First fire at the opening (T-7d).'));
+    if (r.court_auto_allocated && r.original_court_pref) {
+      note.appendChild(document.createTextNode(' Court auto-allocated from C' + r.original_court_pref + ' → C' + r.court_pref + '.'));
+    } else if (r.no_courts_available) {
+      note.appendChild(document.createTextNode(' NO COURTS AVAILABLE: all 3 courts are taken by this time slot.'));
+    } else if (r.first_occurrence_action === 'book_now') {
+      note.appendChild(document.createTextNode(' First occurrence being attempted now.'));
+    }
+    panel.appendChild(note);
+    panel.appendChild(pre(r));
   }
 
   async function addBooking(e) {

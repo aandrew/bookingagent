@@ -57,6 +57,18 @@
     details { background: var(--panel2); border-radius: 6px; padding: 6px 10px; }
     details summary { cursor: pointer; color: var(--muted); }
     .hidden { display: none; }
+    /* v3.6: mobile-friendly tables. Wrap a <table> in a .table-wrap
+       div to get horizontal scroll on small screens (no overflow
+       off the right of the page). For columns the user wants to
+       drop on mobile, add data-hide-sm="1" to the <th>/<td> and
+       they disappear at < 700px wide. */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-wrap > table { min-width: 480px; }
+    .truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+    @media (max-width: 700px) {
+      [data-hide-sm="1"] { display: none; }
+      .truncate { max-width: 140px; }
+    }
   </style>
 </head>
 <body>

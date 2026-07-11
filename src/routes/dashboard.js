@@ -39,7 +39,9 @@ router.get('/', requireAdmin, (req, res) => {
   const accounts = repo.accounts.list();
   const watches = repo.watches.list();
   const bookings = repo.bookings.list({ limit: 10 });
-  const recentAudit = repo.audit.list({ limit: 20 });
+  // v3.6: cap recent API calls at 10 on the overview (was 20 — too many
+  // for a homepage summary). The full audit log is one click away.
+  const recentAudit = repo.audit.list({ limit: 10 });
   const recurringRows = recurring.list();
   annotateFallback(recurringRows);
   const fireEvents = repo.fireEvents.list({ limit: 5 });
@@ -71,6 +73,15 @@ router.get('/bookings', requireAdmin, (req, res) => {
   for (const r of recurringRows) {
     r.account_label = userById[r.account_id]?.label || null;
     r.account_username = userById[r.account_id]?.username || null;
+  }
+  // v3.6: attach account username to each booking so the view can show
+  // "andrew" instead of "#1". Always use the username (or label as
+  // fallback) — the user-facing tables should be human-readable, not
+  // technical.
+  for (const b of bookings) {
+    const a = userById[b.account_id];
+    b.account_username = a?.username || null;
+    b.account_label = a?.label || null;
   }
   res.render('bookings', withLocals({ bookings, accounts, recurringRows, format }));
 });
@@ -128,7 +139,15 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
 router.get('/booking-log', requireAdmin, (req, res) => {
   const events = repo.fireEvents.list({ limit: 200, status: req.query.status || null, recurringId: req.query.recurring_id ? parseInt(req.query.recurring_id, 10) : null });
   const accounts = repo.accounts.list();
-  res.render('booking_log', withLocals({ events, accounts }));
+  // v3.6: attach account username to each fire event so the view can
+  // show the account name (human-readable) instead of "#1".
+  const userById = Object.fromEntries(accounts.map(a => [a.id, a]));
+  for (const e of events) {
+    const a = userById[e.account_id];
+    e.account_username = a?.username || null;
+    e.account_label = a?.label || null;
+  }
+  res.render('booking_log', withLocals({ events, accounts, format }));
 });
 
 // Backward-compat alias for the old /fire-events page

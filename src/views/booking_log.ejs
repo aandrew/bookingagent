@@ -9,7 +9,7 @@
       <tr>
         <td class="muted"><%= e.fired_at || e.scheduled_at %></td>
         <td><% if (e.recurring_id) { %><a href="/recurring/<%= e.recurring_id %>">#<%= e.recurring_id %></a><% } %></td>
-        <td><%= e.account_id ? '#' + e.account_id : '' %></td>
+        <td><%= e.account_username || e.account_label || (e.account_id ? '#' + e.account_id : '') %></td>
         <td>
           <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
           <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>

@@ -66,6 +66,10 @@
         </td>
         <td>
           <% if (r.last_error_category === 'no_courts_available') { %><span class="pill err">no courts available</span>
+          <% } else if (r.last_error_category === 'user_quota_exceeded') { %><span class="pill warn" title="The member has already booked the maximum number of hours they're allowed today on the Koorora site (likely from direct bookings). Free up the quota or disable the recurring.">user quota exceeded</span>
+          <% } else if (r.last_error_category === 'already_booked') { %><span class="pill warn" title="Another member took the slot between the warmup and the fire. The next attempt will try again next week.">slot taken by member</span>
+          <% } else if (r.last_error_category === 'court_invalid') { %><span class="pill err">court invalid</span>
+          <% } else if (r.last_error_category === 'window_not_open') { %><span class="pill warn">window not open</span>
           <% } else if (r.last_status === 'booked') { %><span class="pill ok">booked</span>
           <% } else if (r.last_status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
           <% } else if (r.last_status === 'technical_error' || r.last_status === 'failed') { %><span class="pill err">technical_error</span>

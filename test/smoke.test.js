@@ -736,6 +736,32 @@ test('v3.6: booked_on_fallback detection in route helpers', () => {
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
+test('v3.6: fire.categorize — user_quota_exceeded is distinct from already_booked', () => {
+  // v3.6: when the Koorora server returns
+  //   "Booking this time will push you over the maximum number of hours
+  //    you can book for the day."
+  // it means the member has already used up their hour quota on the
+  // Koorora site (likely from direct bookings outside this system).
+  // This is NOT the same as "another member took the slot" — retrying
+  // won't help until the user frees up their quota. We tag it as
+  // user_quota_exceeded so the dashboard / SQL can tell it apart.
+  const r = fire.categorize({
+    status: 404,
+    body: { message: 'Booking this time will push you over the maximum number of hours you can book for the day.', status: 404 },
+  });
+  assert.equal(r.code, 'no_time_available');
+  assert.equal(r.reason, 'user_quota_exceeded');
+  // The Koorora message is preserved in detail for the log
+  assert.match(r.detail, /over the maximum number of hours/);
+  // Make sure generic 'taken' / 'slot' patterns don't fire on this
+  // message (they would if user_quota_exceeded were missing).
+  const alt = fire.categorize({
+    status: 404,
+    body: { message: 'This slot is already taken.', status: 404 },
+  });
+  assert.notEqual(alt.reason, 'user_quota_exceeded');
+});
+
 test('v3.6: isWithinBookingWindow uses Sydney dates (not container local time)', () => {
   // v3.6: previously the date math used new Date('YYYY-MM-DDT00:00:00')
   // which is local time. The container is UTC but the user is in Sydney,

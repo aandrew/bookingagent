@@ -8,7 +8,6 @@ const STATES = {
   TESTED_OK:      'tested_ok',       // logged in, params bootstrapped
   TOKEN_READY:    'token_ready',     // fresh session, ready to attempt
   PRIMED:         'primed',          // token fresh + prebuilt request ready
-  FIRST_IMMEDIATE:'first_immediate', // first-occurrence is inside 7d window, attempting now
   ATTEMPTING:     'attempting',      // POST in flight
   BOOKED:         'booked',          // last attempt was successful
   FAILED:         'failed',          // last attempt failed
@@ -20,12 +19,11 @@ const STATES = {
 const TRANSITIONS = {
   waiting: ['tested_ok', 'session_expired', 'error'],
   tested_ok: ['token_ready', 'session_expired', 'error'],
-  token_ready: ['primed', 'attempting', 'first_immediate', 'session_expired', 'error'],
+  token_ready: ['primed', 'attempting', 'session_expired', 'error'],
   primed: ['attempting', 'session_expired', 'error'],
-  first_immediate: ['attempting', 'booked', 'failed', 'error'],
   attempting: ['booked', 'failed', 'session_expired', 'error', 'login_required'],
-  booked: ['token_ready', 'primed', 'first_immediate'],
-  failed: ['token_ready', 'primed', 'first_immediate'],
+  booked: ['token_ready', 'primed'],
+  failed: ['token_ready', 'primed'],
   session_expired: ['tested_ok', 'token_ready', 'login_required', 'error'],
   login_required: ['tested_ok', 'error'],
   error: ['tested_ok', 'error'],
