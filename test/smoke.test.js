@@ -1356,6 +1356,49 @@ test('v5: dashboard.css ships the v5 design tokens + new overview classes', () =
   assert.match(css, /@media\s*\(\s*max-width:\s*1023px\s*\)/, 'must define the mobile breakpoint (max-width 1023px)');
 });
 
+// v5.1: small "shape" test for the bug-fix changes — section titles, top
+// nav, sidebar arrow, all-pages styling. These are guard rails so
+// future refactors don't silently revert the user-reported bugs.
+test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages styling applied', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const headerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'partials', 'header.ejs'), 'utf8');
+  const sidebarSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'partials', 'sidebar.ejs'), 'utf8');
+  const overviewSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'overview.ejs'), 'utf8');
+  const dashboardSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'dashboard.css'), 'utf8');
+
+  // 1. Section titles changed in overview.ejs
+  assert.match(overviewSrc, /Upcoming bookings/, 'overview must have "Upcoming bookings" section title');
+  assert.match(overviewSrc, /Booking log/, 'overview must have "Booking log" section title');
+  assert.doesNotMatch(overviewSrc, /LIVE OPERATIONS/, 'overview must not have "LIVE OPERATIONS" (replaced with "Upcoming bookings")');
+  assert.doesNotMatch(overviewSrc, /RECENT ATTEMPTS/, 'overview must not have "RECENT ATTEMPTS" (replaced with "Booking log")');
+
+  // 2. Top nav buttons in header
+  assert.match(headerSrc, /v5-topnav/, 'header must have the .v5-topnav class');
+  assert.match(headerSrc, /data-topnav="overview"/, 'header must have the Overview top-nav button');
+  assert.match(headerSrc, /data-topnav="bookings"/, 'header must have the Bookings top-nav button');
+  assert.match(headerSrc, /data-topnav="settings"/, 'header must have the Settings top-nav button');
+
+  // 3. Sidebar arrow is the more visible ▸ (was ›, which was too small)
+  assert.match(sidebarSrc, /v5-sidebar-arrow[^>]*>▸</, 'sidebar arrow must be the filled triangle ▸, not the small ›');
+
+  // 4. Dashboard CSS has the new v5.1 pieces
+  assert.match(dashboardSrc, /\.v5-topnav\s*\{/, 'dashboard.css must define .v5-topnav');
+  assert.match(dashboardSrc, /\.v5-topnav-item\s*\{/, 'dashboard.css must define .v5-topnav-item');
+  assert.match(dashboardSrc, /--v5-topnav-height:/, 'dashboard.css must define the --v5-topnav-height token');
+  assert.match(dashboardSrc, /\.v5-sidebar-parent\s*\{[^}]*padding:\s*10px\s+20px/s, 'sidebar parent must share the item padding (10px 20px)');
+  assert.match(dashboardSrc, /\.v5-sidebar-item:hover[^}]*text-decoration:\s*none/s, 'sidebar item hover must not underline (v5.1)');
+  assert.match(dashboardSrc, /\.v5-sidebar-parent:hover[^}]*\.v5-sidebar-arrow/, 'parent arrow should react to hover (v5.1)');
+  assert.match(dashboardSrc, /@media\s*\(\s*max-width:\s*1023px\s*\)[^}]*\.v5-topnav\s*\{\s*display:\s*none/s, 'top nav must hide on mobile (v5.1)');
+
+  // 5. Header has the v5.1 color tokens (Volt Lime accent, glass bg)
+  assert.match(headerSrc, /--accent:#c3f400/, 'header must use the Volt Lime accent (#c3f400)');
+  assert.match(headerSrc, /backdrop-filter:\s*blur\(12px\)/, 'header must use the glass backdrop blur (v5.1)');
+  assert.match(headerSrc, /background:\s*rgba\(15,\s*23,\s*42,\s*0\.7\)/, 'header must use the v5 dark background');
+  assert.match(headerSrc, /\.panel\s*\{[^}]*backdrop-filter:\s*blur/s, 'all .panel elements must use the glass backdrop (v5.1)');
+  assert.doesNotMatch(headerSrc, /a:hover\s*\{[^}]*text-decoration:\s*underline/, 'global a:hover must not underline (v5.1)');
+});
+
 test('v3.6: fire.categorize — user_quota_exceeded is distinct from already_booked', () => {
   // v3.6: when the Koorora server returns
   //   "Booking this time will push you over the maximum number of hours

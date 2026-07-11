@@ -51,6 +51,15 @@ body:not(.has-sidebar-open) main { margin-left: 0; }
   body.has-sidebar-open main { margin-left: 0 !important; }
 }
 
+/* v5.1: the sidebar starts BELOW the top nav on desktop so the
+ * top nav buttons aren't covered when the sidebar is open. The
+ * --v5-topnav-height matches the actual header.top height. On mobile
+ * the sidebar is a full-screen overlay and can cover the top nav. */
+.v5-sidebar { top: var(--v5-topnav-height, 0px); }
+@media (max-width: 1023px) {
+  .v5-sidebar { top: 0; }
+}
+
 /* --- Sidebar --------------------------------------------------------- */
 
 .v5-sidebar {
@@ -117,8 +126,11 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
   color: var(--v5-sidebar-text-muted);
 }
 
-/* Sidebar items (top-level + accordion children) */
-.v5-sidebar-item, .v5-sidebar-child {
+/* Sidebar items (top-level + accordion children). v5.1: the parent
+ * (Bookings / Settings) and the item (Overview / direct links) now
+ * share the same padding, gap, and color rules — the parent just
+ * adds an arrow on the right. */
+.v5-sidebar-item, .v5-sidebar-child, .v5-sidebar-parent {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -130,48 +142,49 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
   width: 100%;
   text-align: left;
   font: inherit;
+  font-size: 14px;
   cursor: pointer;
   position: relative;
   transition: background 80ms, color 80ms;
 }
-.v5-sidebar-item:hover, .v5-sidebar-child:hover {
+.v5-sidebar-item:hover, .v5-sidebar-child:hover, .v5-sidebar-parent:hover {
   background: var(--v5-sidebar-hover);
   color: var(--v5-sidebar-text);
+  text-decoration: none;
 }
-.v5-sidebar-item.active, .v5-sidebar-child.active {
+.v5-sidebar-item.active, .v5-sidebar-child.active, .v5-sidebar-parent.active {
   background: var(--v5-sidebar-active);
   color: var(--v5-sidebar-accent);
 }
-.v5-sidebar-item .v5-sidebar-icon, .v5-sidebar-child .v5-sidebar-icon {
+.v5-sidebar-item .v5-sidebar-icon, .v5-sidebar-child .v5-sidebar-icon, .v5-sidebar-parent .v5-sidebar-icon {
   font-size: 18px;
   width: 22px;
   text-align: center;
   flex-shrink: 0;
 }
-.v5-sidebar-item .v5-sidebar-label, .v5-sidebar-child .v5-sidebar-label { flex: 1; }
+.v5-sidebar-item .v5-sidebar-label, .v5-sidebar-child .v5-sidebar-label, .v5-sidebar-parent .v5-sidebar-label { flex: 1; }
 
-/* Accordion */
-.v5-sidebar-parent {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--v5-sidebar-text-muted);
-  font: inherit;
-  cursor: pointer;
-}
-.v5-sidebar-parent:hover { background: var(--v5-sidebar-hover); color: var(--v5-sidebar-text); }
-.v5-sidebar-parent.active { color: var(--v5-sidebar-accent); }
+/* Accordion: the arrow is now bigger + brighter + has a hover
+ * background so it's clearly a click affordance. We use the filled
+ * triangle (▸ / ▾) for the up/down visual, plus a CSS rotate as a
+ * fallback. */
 .v5-sidebar-parent .v5-sidebar-arrow {
-  width: 18px;
-  text-align: center;
-  font-size: 14px;
-  transition: transform var(--v5-sidebar-transition);
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--v5-sidebar-text-muted);
+  font-size: 12px;
+  line-height: 1;
+  transition: transform var(--v5-sidebar-transition), background 80ms, color 80ms;
   flex-shrink: 0;
 }
-.v5-sidebar-parent[aria-expanded="true"] .v5-sidebar-arrow { transform: rotate(90deg); }
+.v5-sidebar-parent:hover .v5-sidebar-arrow { background: rgba(195, 244, 0, 0.16); color: var(--v5-sidebar-accent); }
+.v5-sidebar-parent[aria-expanded="true"] .v5-sidebar-arrow {
+  background: rgba(195, 244, 0, 0.22);
+  color: var(--v5-sidebar-accent);
+  transform: rotate(90deg);
+}
 .v5-sidebar-children {
   display: none;
   background: rgba(0, 0, 0, 0.18);
@@ -233,6 +246,40 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
 @media (min-width: 1024px) {
   /* Desktop: hamburger visible only when sidebar is collapsed */
   body.has-sidebar-collapsed .v5-hamburger { display: inline-flex; }
+}
+
+/* v5.1: top nav buttons (Overview / Bookings / Settings) — same visual
+ * style as the sub-nav items, so the heights line up. Hidden on
+ * mobile to save space (the sidebar handles nav on phones). */
+:root { --v5-topnav-height: 60px; }
+.v5-topnav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 1rem;
+}
+.v5-topnav-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--v5-sidebar-text-muted, #8a93a3);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 0.375rem;
+  text-decoration: none;
+  transition: background 80ms, color 80ms;
+}
+.v5-topnav-item:hover { background: var(--v5-sidebar-hover, rgba(195, 244, 0, 0.08)); color: var(--v5-sidebar-text, #d4e4fa); text-decoration: none; }
+.v5-topnav-item.active { background: var(--v5-sidebar-active, rgba(195, 244, 0, 0.14)); color: var(--v5-sidebar-accent, #c3f400); }
+@media (max-width: 1023px) {
+  /* Mobile: hide the top nav, the sidebar handles nav */
+  .v5-topnav { display: none; }
+  :root { --v5-topnav-height: 0px; }
 }
 
 /* --- Reduced motion ------------------------------------------------- */

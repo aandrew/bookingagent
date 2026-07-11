@@ -6,55 +6,92 @@
   <title><%= typeof title !== 'undefined' ? title : 'Kooroo Agent' %></title>
   <link rel="stylesheet" href="/public/dashboard.css">
   <style>
-    :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f242d; --text:#e6e8eb; --muted:#8a93a3; --accent:#5ee0a7; --warn:#f0c674; --err:#e06c75; --line:#262c36; --info:#7ebec5; }
+    /* v5.1: the inline styles here now mirror the v5 design tokens. The
+     * detailed v5 component classes (sidebar, top nav, overview cards,
+     * terminal panel) live in /public/dashboard.css. The styles below
+     * are the "page chrome" that wraps every page: body, header, main,
+     * panel (the glass card), table, inputs, buttons, pills, footer.
+     * They use the v5 palette so every page automatically picks up the
+     * new look — no per-page EJS changes needed. */
+    :root { --bg:#051424; --panel:rgba(13,28,45,0.7); --panel2:rgba(7,20,36,0.55); --text:#d4e4fa; --muted:#8a93a3; --accent:#c3f400; --warn:#f0c674; --err:#e06c75; --line:rgba(255,255,255,0.06); --info:#7ebec5; }
     * { box-sizing: border-box; }
     body { margin:0; font: 14px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+    /* v5.1: no underlines on hover anywhere by default. The active state
+     * carries the affordance. Specific surfaces can opt in to underlines. */
     a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    header.top { display:flex; align-items:center; gap: 1rem; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-    header.top h1 { font-size: 16px; margin:0; letter-spacing: .2px; }
-    /* v5: top nav no longer carries the page links — they live in the
-       sidebar. The top nav now holds the hamburger toggle (left), the
-       app title (left), the user label + logout (right). */
-    header.top .spacer { flex:1; }
+    a:hover { text-decoration: none; }
+    header.top {
+      display: flex; align-items: center; gap: 1rem;
+      padding: 10px 18px;
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+    header.top h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+    header.top .spacer { flex: 1; }
     header.top .who { color: var(--muted); font-size: 12px; }
-    /* v5: the sidebar takes 280px (or 64px when collapsed) on desktop, so
-     * the main content shifts right. The --v5-content-shift variable
-     * is set by sidebar.js. The max-width stays 1200px for the
-     * overview so the panels line up like the design. */
+    /* v5.1: the sidebar starts BELOW the top nav on desktop so the
+     * top nav buttons aren't covered when the sidebar is open. The
+     * --v5-topnav-height is set by the CSS to the actual height of
+     * header.top. On mobile, the sidebar covers everything (overlay). */
     main { padding: 18px; max-width: 1200px; margin: 0 auto; }
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
-    .panel h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    /* v5.1: glass card style for every .panel. The existing pages
+     * (bookings, recurring, accounts, etc.) all use <div class="panel">
+     * so they automatically pick up the new look. */
+    .panel {
+      background: var(--panel);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--line);
+      border-top-color: rgba(255, 255, 255, 0.12);
+      border-radius: 0.5rem;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .panel h2 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      margin: 0 0 14px;
+      color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .panel h2 .muted { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-    th { color: var(--muted); font-weight: 500; }
-    tr:hover td { background: var(--panel2); }
-    .pill { display:inline-block; padding: 1px 8px; border-radius: 999px; background: var(--panel2); color: var(--muted); font-size: 11px; }
-    .pill.ok { background: rgba(94,224,167,.12); color: var(--accent); }
-    .pill.warn { background: rgba(240,198,116,.12); color: var(--warn); }
-    .pill.err { background: rgba(224,108,117,.12); color: var(--err); }
-    .pill.info { background: rgba(126,190,197,.12); color: var(--info); }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--text); }
+    th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+    tr:hover td { background: rgba(255, 255, 255, 0.04); }
+    /* v5.1: status pills (still using the .pill classes for backward
+     * compat with the v4 live handlers). The Volt Lime accent is the
+     * new "ok" colour; amber for warn; soft red for err. */
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; background: var(--panel2); color: var(--text); font-size: 11px; font-weight: 600; }
+    .pill.ok { background: rgba(195, 244, 0, 0.18); color: var(--accent); border: 1px solid rgba(195, 244, 0, 0.45); }
+    .pill.warn { background: rgba(240, 198, 116, 0.18); color: var(--warn); border: 1px solid rgba(240, 198, 116, 0.45); }
+    .pill.err { background: rgba(224, 108, 117, 0.18); color: var(--err); border: 1px solid rgba(224, 108, 117, 0.45); }
+    .pill.info { background: rgba(126, 190, 197, 0.18); color: var(--info); border: 1px solid rgba(126, 190, 197, 0.45); }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > .panel { flex: 1 1 320px; }
     input[type=text], input[type=password], input[type=email], input[type=number], input[type=time], input[type=date], select, textarea {
-      background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; width: 100%;
+      background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: inherit; width: 100%;
     }
-    label { display:block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
     button, .btn {
-      background: var(--accent); color: #0c1014; border: 0; border-radius: 6px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
+      background: var(--accent); color: #051424; border: 0; border-radius: 6px; padding: 8px 14px; font: inherit; font-weight: 700; cursor: pointer;
     }
     button.secondary, .btn.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
-    button.danger { background: var(--err); color: #0c1014; }
-    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    pre { background: #0a0c10; color: #cfd5dd; padding: 10px; border-radius: 6px; overflow: auto; max-height: 280px; }
+    button.danger { background: var(--err); color: #051424; }
+    button.danger.secondary { background: transparent; color: var(--err); border: 1px solid var(--err); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    pre { background: rgba(10, 12, 16, 0.7); color: #cfd5dd; padding: 12px; border-radius: 6px; overflow: auto; max-height: 280px; border: 1px solid var(--line); }
     .muted { color: var(--muted); }
     .flash { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
-    .flash.ok { background: rgba(94,224,167,.12); color: var(--accent); }
-    .flash.err { background: rgba(224,108,117,.12); color: var(--err); }
+    .flash.ok { background: rgba(195, 244, 0, 0.18); color: var(--accent); }
+    .flash.err { background: rgba(224, 108, 117, 0.18); color: var(--err); }
     .flash.auto-dismiss { animation: flash-fade 4s ease-in forwards; }
     @keyframes flash-fade { 0% { opacity: 0; transform: translateY(-4px); } 10% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; } }
     form.inline { display: inline; }
-    .error-banner { background: rgba(224,108,117,.12); border: 1px solid #e06c75; color: #e06c75; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+    .error-banner { background: rgba(224, 108, 117, 0.12); border: 1px solid #e06c75; color: #e06c75; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
     .error-banner .actions { display: flex; gap: 8px; margin-top: 8px; }
     .error-banner .actions button { background: transparent; color: #e06c75; border: 1px solid #e06c75; padding: 4px 10px; }
     .error-banner .actions button.danger { background: #e06c75; color: #0c1014; border-color: #e06c75; }
@@ -63,10 +100,7 @@
     details summary { cursor: pointer; color: var(--muted); }
     .hidden { display: none; }
     /* v3.6: mobile-friendly tables. Wrap a <table> in a .table-wrap
-       div to get horizontal scroll on small screens (no overflow
-       off the right of the page). For columns the user wants to
-       drop on mobile, add data-hide-sm="1" to the <th>/<td> and
-       they disappear at < 700px wide. */
+       div to get horizontal scroll on small screens. */
     .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .table-wrap > table { min-width: 480px; }
     .truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
@@ -74,14 +108,37 @@
       [data-hide-sm="1"] { display: none; }
       .truncate { max-width: 140px; }
     }
+    /* v5.1: footer. The v4 live indicator (right side) still works. */
+    footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 18px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); background: rgba(15, 23, 42, 0.7); margin-top: 18px; }
   </style>
 </head>
 <body>
+  <%#
+    Compute the top-nav active states here so the markup can use them.
+    Same logic as sidebar.ejs (server-side currentPath match).
+  %>
+  <%
+    const bookingsPaths = ['/bookings', '/make-booking', '/booking-log', '/fire-events', '/recurring'];
+    const settingsPaths = ['/settings', '/accounts', '/audit'];
+    const bookingsActive = bookingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/'));
+    const settingsActive = settingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/'));
+    const overviewActive = currentPath === '/';
+  %>
   <header class="top">
     <% if (user) { %>
       <button class="v5-hamburger" type="button" aria-label="Toggle navigation" aria-expanded="false">≡</button>
     <% } %>
     <h1>🎾 Kooroora Booking Agent</h1>
+    <%# v5.1: top nav buttons. Same visual style as the sidebar sub-nav
+        items (height, padding, hover, active). On mobile (< 1024px) the
+        top nav is hidden to save space; the sidebar handles nav. %>
+    <% if (user) { %>
+      <nav class="v5-topnav" aria-label="Top navigation">
+        <a href="/" class="v5-topnav-item <%= overviewActive ? 'active' : '' %>" data-topnav="overview">Overview</a>
+        <a href="/bookings" class="v5-topnav-item <%= bookingsActive ? 'active' : '' %>" data-topnav="bookings">Bookings</a>
+        <a href="/settings" class="v5-topnav-item <%= settingsActive ? 'active' : '' %>" data-topnav="settings">Settings</a>
+      </nav>
+    <% } %>
     <span class="spacer"></span>
     <% if (user) { %>
       <span class="who"><%= user.username %></span>
