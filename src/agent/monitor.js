@@ -36,9 +36,19 @@ function pickTimeWindow(watch) {
 // The user must use the Make Booking form (recurring) for >7 days.
 function isWithinBookingWindow(targetDateStr) {
   if (!targetDateStr) return false;
-  const target = new Date(String(targetDateStr) + 'T00:00:00');
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((target - today) / 86_400_000);
+  // v3.6: the date math must use Sydney time, not the container's local
+  // time. The container is UTC, but the user is in Sydney, so a date
+  // string like "2026-07-15" represents a Sydney calendar day. If we
+  // naively used `new Date('2026-07-15T00:00:00')` (which interprets in
+  // local time = UTC), a user in Sydney at 8am (22:00 UTC the previous
+  // day) would see "today" as 2026-07-10 (UTC) when they think it's
+  // 2026-07-11 (Sydney), making the 7-day boundary off by a day.
+  // Using sydneyWallToUtc + sydneyDateString anchors both ends to Sydney.
+  const time = require('./time');
+  const targetMs = time.sydneyWallToUtc(String(targetDateStr), '00:00');
+  const todaySydney = time.sydneyDateString(Date.now());
+  const todayMs = time.sydneyWallToUtc(todaySydney, '00:00');
+  const diffDays = Math.round((targetMs - todayMs) / 86_400_000);
   return diffDays >= 0 && diffDays <= 7;
 }
 

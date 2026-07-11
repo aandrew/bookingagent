@@ -736,6 +736,33 @@ test('v3.6: booked_on_fallback detection in route helpers', () => {
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
+test('v3.6: isWithinBookingWindow uses Sydney dates (not container local time)', () => {
+  // v3.6: previously the date math used new Date('YYYY-MM-DDT00:00:00')
+  // which is local time. The container is UTC but the user is in Sydney,
+  // so this off-by-one'd at the 7-day boundary. The fix uses
+  // sydneyWallToUtc + sydneyDateString so the math is anchored to Sydney.
+  const monitor = require('../src/agent/monitor');
+  const time = require('../src/agent/time');
+  const todaySydney = time.sydneyDateString(Date.now());
+  // today + 6 days in Sydney → within window
+  const inWindow = new Date(time.sydneyWallToUtc(todaySydney, '00:00') + 6 * 86_400_000);
+  const inWindowStr = time.sydneyDateString(inWindow.getTime());
+  assert.equal(monitor.isWithinBookingWindow(inWindowStr), true, `${inWindowStr} (today+6) should be within window`);
+  // today + 8 days in Sydney → outside window
+  const outOfWindow = new Date(time.sydneyWallToUtc(todaySydney, '00:00') + 8 * 86_400_000);
+  const outOfWindowStr = time.sydneyDateString(outOfWindow.getTime());
+  assert.equal(monitor.isWithinBookingWindow(outOfWindowStr), false, `${outOfWindowStr} (today+8) should be outside window`);
+  // today in Sydney → within window (diffDays = 0)
+  assert.equal(monitor.isWithinBookingWindow(todaySydney), true, `today (${todaySydney}) should be within window`);
+  // today - 1 in Sydney → NOT in window (diffDays = -1)
+  const yesterday = new Date(time.sydneyWallToUtc(todaySydney, '00:00') - 86_400_000);
+  const yesterdayStr = time.sydneyDateString(yesterday.getTime());
+  assert.equal(monitor.isWithinBookingWindow(yesterdayStr), false, `yesterday (${yesterdayStr}) should be outside window`);
+  // Empty / null → false
+  assert.equal(monitor.isWithinBookingWindow(null), false);
+  assert.equal(monitor.isWithinBookingWindow(''), false);
+});
+
 test('v3.6: booker.cancel refuses to cancel a booking with no external_id', async () => {
   const a = repo.accounts.create({ label: 'v36cancel', username: 'v36cancel', password: 'p' });
   const b = repo.bookings.create({

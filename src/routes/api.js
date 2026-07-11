@@ -112,9 +112,13 @@ router.post('/watches', requireAdmin, async (req, res) => {
   //     monitor.js fires it as soon as possible.
   //   - Otherwise, use "scheduled" so the fire-due-watches cron can pick it
   //     up at the right time.
-  const target = new Date(String(w.date_from) + 'T00:00:00');
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const diffDays = Math.round((target - today) / 86_400_000);
+  // v3.6: use Sydney date math (not the container's local time, which is UTC).
+  // The user is in Sydney and the date string represents a Sydney calendar day.
+  const time = require('../agent/time');
+  const targetMs = time.sydneyWallToUtc(String(w.date_from), '00:00');
+  const todaySydney = time.sydneyDateString(Date.now());
+  const todayMs = time.sydneyWallToUtc(todaySydney, '00:00');
+  const diffDays = Math.round((targetMs - todayMs) / 86_400_000);
   w.strategy = diffDays <= 7 ? 'watch' : 'scheduled';
   // Auto-derive end time if not given
   if (!w.time_end && w.time_start && w.duration_mins) {
