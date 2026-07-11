@@ -1373,10 +1373,20 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
   assert.doesNotMatch(overviewSrc, /RECENT ATTEMPTS/, 'overview must not have "RECENT ATTEMPTS" (replaced with "Booking log")');
 
   // 2. Top nav buttons in header
-  assert.match(headerSrc, /v5-topnav/, 'header must have the .v5-topnav class');
-  assert.match(headerSrc, /data-topnav="overview"/, 'header must have the Overview top-nav button');
-  assert.match(headerSrc, /data-topnav="bookings"/, 'header must have the Bookings top-nav button');
-  assert.match(headerSrc, /data-topnav="settings"/, 'header must have the Settings top-nav button');
+  // v5.1.6: the top nav is in partials/topnav.ejs (rendered inside
+  // <main>), not header.ejs. Look there.
+  const topnavSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'partials', 'topnav.ejs'), 'utf8');
+  assert.match(topnavSrc, /v5-topnav/, 'topnav partial must have the .v5-topnav class');
+  assert.match(topnavSrc, /data-topnav="overview"/, 'topnav partial must have the Overview top-nav button');
+  assert.match(topnavSrc, /data-topnav="bookings"/, 'topnav partial must have the Bookings top-nav button');
+  assert.match(topnavSrc, /data-topnav="settings"/, 'topnav partial must have the Settings top-nav button');
+  // And the header should NOT have the top nav anymore (it's in main now).
+  // The inline <style> in header.ejs still has the CSS variable
+  // --v5-topnav-height: 60px, so a bare `v5-topnav` regex matches the
+  // variable name. Use a more specific pattern: <nav class="v5-topnav.
+  assert.doesNotMatch(headerSrc, /<nav class="v5-topnav/, 'header should NOT have <nav class="v5-topnav> (it lives in main now)');
+  // The topnav partial is included in header.ejs (so it renders inside <main>)
+  assert.match(headerSrc, /include\(['"]topnav['"]\)/, 'header.ejs must include the topnav partial inside main');
 
   // 3. Sidebar arrow is the more visible ▸ (was ›, which was too small)
   assert.match(sidebarSrc, /v5-sidebar-arrow[^>]*>▸</, 'sidebar arrow must be the filled triangle ▸, not the small ›');
@@ -1460,6 +1470,43 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
   assert.match(headerSrc, /\.panel\s*\{[^}]*backdrop-filter:\s*blur/s, 'all .panel elements must use the glass backdrop (v5.1)');
   assert.doesNotMatch(headerSrc, /a:hover\s*\{[^}]*text-decoration:\s*underline/, 'global a:hover must not underline (v5.1)');
 });
+
+// v5.1.6: the top nav is in main (not header), and the sidebar is a
+// true overlay (no content shift, no footer padding shift). Two major
+// divs: the page (header + main + footer) and the sidebar.
+test('v5.1.6: top nav in main, sidebar is a true overlay (no content shift)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const headerSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'partials', 'header.ejs'), 'utf8');
+  const dashboardSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'dashboard.css'), 'utf8');
+
+  // 1. header.ejs does NOT set margin-left on main — the sidebar is an
+  // overlay, the page content stays in place.
+  assert.doesNotMatch(headerSrc, /margin-left:\s*var\(--v5-content-shift\)/, 'header.ejs must not shift main with margin-left (sidebar is an overlay)');
+  // 2. header.ejs does NOT set padding-left on footer for the sidebar
+  // state (since the content doesn't shift, neither does the footer).
+  assert.doesNotMatch(headerSrc, /body\.has-sidebar-open\s+footer/, 'header.ejs must not move the footer based on sidebar state (content does not shift)');
+  // 3. The sidebar starts at top: 0 (covers the top nav which is in
+  // main, and the rest of the content).
+  assert.match(dashboardCss(dashboardSrc), /\.v5-sidebar\s*\{[^}]*top:\s*0/s, 'sidebar must start at top: 0 (it overlays the top nav + content)');
+  // 4. The --v5-topnav-height variable is kept (it was the height of
+  // the OLD header.top nav, but now the top nav is in main — the
+  // variable is no longer needed but harmless if it remains).
+  // 5. The top nav partial is included inside <main>, not in <header>.
+  // We check that the partial include appears AFTER the <main> tag.
+  const mainIdx = headerSrc.indexOf('<main>');
+  const includeIdx = headerSrc.indexOf("include('topnav')");
+  assert.ok(mainIdx > 0, 'header.ejs must open a <main> tag');
+  assert.ok(includeIdx > 0, 'header.ejs must include the topnav partial');
+  assert.ok(includeIdx > mainIdx, 'topnav partial must be included AFTER <main> (so the top nav renders inside main)');
+  // 6. The sidebar's z-index is high (z-index: 50) so it covers the
+  // page content when open.
+  assert.match(dashboardSrc, /\.v5-sidebar\s*\{[^}]*z-index:\s*50/s, 'sidebar must have z-index: 50 (high enough to cover the top nav + main content)');
+  // 7. The sidebar has position: fixed (overlay positioning).
+  assert.match(dashboardSrc, /\.v5-sidebar\s*\{[^}]*position:\s*fixed/s, 'sidebar must be position: fixed (true overlay, not a pusher)');
+});
+
+function dashboardCss(src) { return src; }
 
 test('v3.6: fire.categorize — user_quota_exceeded is distinct from already_booked', () => {
   // v3.6: when the Koorora server returns

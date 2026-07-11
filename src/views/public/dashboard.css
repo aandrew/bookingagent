@@ -28,37 +28,28 @@
   --v5-sidebar-backdrop: rgba(5, 20, 36, 0.55);
   --v5-sidebar-radius: 0.5rem;
   --v5-sidebar-transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-  --v5-content-shift: 0px;  /* set by JS when sidebar is open on desktop */
 }
 
 * { box-sizing: border-box; }
 
-/* The sidebar is fixed on the left; the existing .panel-based main
- * content needs a left margin when the sidebar is open on desktop.
- * The JS toggles .has-sidebar-open on <body>; CSS shifts the content
- * via the --v5-content-shift variable. */
-body.has-sidebar-open main { margin-left: var(--v5-content-shift); transition: margin-left var(--v5-sidebar-transition); }
-body.has-sidebar-collapsed main { --v5-content-shift: var(--v5-sidebar-collapsed); }
-body:not(.has-sidebar-open) main { margin-left: 0; }
+/* v5.1.6: the sidebar is a true overlay (z-index high, no margin-left
+ * shift on main). Two major divs: the page (header + main + footer)
+ * and the sidebar. The top nav lives inside main (see partials/topnav.ejs)
+ * so it moves with the content. When the sidebar opens, it slides in
+ * over the top nav + main content; the content itself does not shift
+ * right. This gives a clean overlay experience on both desktop and
+ * mobile. */
+body.has-sidebar-open main { /* no margin-left — sidebar overlays */ }
+body:not(.has-sidebar-open) main { /* same */ }
+/* The v5.1/v5.1.5 --v5-content-shift variable is no longer used by
+ * main; we keep it as a CSS variable (set on :root) for the footer's
+ * left padding alignment on desktop when the sidebar is open. */
 
-@media (min-width: 1024px) {
-  body.has-sidebar-open:not(.has-sidebar-collapsed) main { --v5-content-shift: var(--v5-sidebar-width); }
-}
-
-@media (max-width: 1023px) {
-  /* Mobile: the sidebar is always a full-width overlay; the content
-   * never gets a left margin (the backdrop dims whatever's behind). */
-  body.has-sidebar-open main { margin-left: 0 !important; }
-}
-
-/* v5.1: the sidebar starts BELOW the top nav on desktop so the
- * top nav buttons aren't covered when the sidebar is open. The
- * --v5-topnav-height matches the actual header.top height. On mobile
- * the sidebar is a full-screen overlay and can cover the top nav. */
-.v5-sidebar { top: var(--v5-topnav-height, 0px); }
-@media (max-width: 1023px) {
-  .v5-sidebar { top: 0; }
-}
+/* v5.1.6: the sidebar is a true overlay — top: 0 on all viewports so it
+ * covers the top nav + main content when open. The top nav lives
+ * inside main (see partials/topnav.ejs) and moves with the content;
+ * the sidebar overlays the whole page from the left edge. */
+.v5-sidebar { top: 0; }
 
 /* --- Sidebar --------------------------------------------------------- */
 
@@ -318,13 +309,10 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
 .v5-sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.06); border-radius: 3px; }
 .v5-sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.12); }
 
-/* --- Live indicator nudge (v4 footer dot still works) --------------- */
-/* The footer indicator is rendered by partials/footer.ejs inline. v5
- * just nudges its position so it sits clear of the sidebar. */
-body.has-sidebar-open footer { padding-left: calc(var(--v5-content-shift) + 18px); transition: padding-left var(--v5-sidebar-transition); }
-@media (max-width: 1023px) {
-  body.has-sidebar-open footer { padding-left: 18px !important; }
-}
+/* --- Footer (v4 live indicator still works) ------------------------- */
+/* The footer is rendered by partials/footer.ejs inline. v5.1.6: the
+ * content no longer shifts when the sidebar opens (it's a true overlay),
+ * so the footer stays in place regardless of sidebar state. */
 
 /* --- v5 Overview (Phase 2) -----------------------------------------
  * Glass cards, Volt Lime accent, monospaced data, initials chip.

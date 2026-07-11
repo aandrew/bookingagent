@@ -113,32 +113,11 @@
   </style>
 </head>
 <body>
-  <%#
-    Compute the top-nav active states here so the markup can use them.
-    Same logic as sidebar.ejs (server-side currentPath match).
-  %>
-  <%
-    const bookingsPaths = ['/bookings', '/make-booking', '/booking-log', '/fire-events', '/recurring'];
-    const settingsPaths = ['/settings', '/accounts', '/audit'];
-    const bookingsActive = bookingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/'));
-    const settingsActive = settingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/'));
-    const overviewActive = currentPath === '/';
-  %>
   <header class="top">
     <% if (user) { %>
       <button class="v5-hamburger" type="button" aria-label="Toggle navigation" aria-expanded="false">≡</button>
     <% } %>
     <h1>🎾 Kooroora Booking Agent</h1>
-    <%# v5.1: top nav buttons. Same visual style as the sidebar sub-nav
-        items (height, padding, hover, active). On mobile (< 1024px) the
-        top nav is hidden to save space; the sidebar handles nav. %>
-    <% if (user) { %>
-      <nav class="v5-topnav" aria-label="Top navigation">
-        <a href="/" class="v5-topnav-item <%= overviewActive ? 'active' : '' %>" data-topnav="overview">Overview</a>
-        <a href="/bookings" class="v5-topnav-item <%= bookingsActive ? 'active' : '' %>" data-topnav="bookings">Bookings</a>
-        <a href="/settings" class="v5-topnav-item <%= settingsActive ? 'active' : '' %>" data-topnav="settings">Settings</a>
-      </nav>
-    <% } %>
     <span class="spacer"></span>
     <% if (user) { %>
       <span class="who"><%= user.username %></span>
@@ -151,6 +130,12 @@
     <%- include('sidebar') %>
   <% } %>
   <main>
+    <%# v5.1.6: top nav is rendered INSIDE main (not in the global header).
+        This keeps the top nav aligned with the page content, and
+        means the sidebar's overlay covers the top nav + main content
+        together when the sidebar is open. The top nav partial computes
+        its own active states from currentPath. %>
+    <%- include('topnav') %>
     <% if (user && typeof activeErrors !== 'undefined' && activeErrors && activeErrors.length) { %>
       <% activeErrors.forEach(function(err) { %>
         <div class="error-banner" data-recurring-id="<%= err.id %>">

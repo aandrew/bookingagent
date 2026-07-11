@@ -1,0 +1,27 @@
+<%#
+  v5.1.6: top nav partial — renders INSIDE <main> so the nav buttons
+  move with the content (not pinned to the global header). This
+  means the sidebar's overlay correctly covers the top nav + main
+  content together, and the active state stays aligned with the
+  page content even if the layout shifts.
+
+  The active states are computed server-side from currentPath, same
+  logic as sidebar.ejs.
+
+  Hidden on mobile (< 1024px) — the sidebar handles nav on phones.
+  This is set via .v5-topnav { display: none } in dashboard.css under
+  the @media (max-width: 1023px) block.
+%>
+<%
+  if (typeof user === 'undefined' || !user) return;
+  const bookingsPaths = ['/bookings', '/make-booking', '/booking-log', '/fire-events', '/recurring'];
+  const settingsPaths = ['/settings', '/accounts', '/audit'];
+  const bookingsActive = bookingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/'));
+  const settingsActive = settingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/'));
+  const overviewActive = currentPath === '/';
+%>
+<nav class="v5-topnav" aria-label="Top navigation">
+  <a href="/" class="v5-topnav-item <%= overviewActive ? 'active' : '' %>" data-topnav="overview">Overview</a>
+  <a href="/bookings" class="v5-topnav-item <%= bookingsActive ? 'active' : '' %>" data-topnav="bookings">Bookings</a>
+  <a href="/settings" class="v5-topnav-item <%= settingsActive ? 'active' : '' %>" data-topnav="settings">Settings</a>
+</nav>
