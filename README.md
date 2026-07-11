@@ -15,6 +15,12 @@ Multi-account tennis-court booking agent for [kooroora.asn.au](https://kooroora.
 
 Kooroora releases booking slots **exactly 7 days before the slot's start time, to the hour**. The agent holds an active session, primes a pre-built POST request minutes before the release, then fires at the exact millisecond to win the race against other bots. It chains successful fires to the following week automatically.
 
+**v3.6 highlights**
+- **Faster fire path** — all pre-POST work (session probe, body build, cookie hydration) now happens at T-leadMs via `warmup.prepareForFire`. The fire callback at T is just `setTimeout(POST)`, not 2-3 seconds of setup. A regression test enforces the < 50ms budget.
+- **`booked_unverified` + 30s reconciliation** — when the server confirms a booking but the immediate day-schedule lookup misses it (cache / eventual consistency), the row is recorded as `booked_unverified` and a cron fills in `external_id` within 30s. The dashboard shows a "reconciling…" pill until then; Cancel is disabled because we have no id to send to the server.
+- **Audit log no longer stores 147KB HTML pages** — `client.request` only captures request/response bodies for non-GET requests. Shrinks `audit_log` by ~95%. Set `AUDIT_FULL_BODIES=1` for the old behaviour.
+- **`booked_on_fallback_court` warning** — when a booking lands on a non-preferred court (the preferred court was taken between warmup and fire), the dashboard shows a "last booking on fallback court" pill on the recurring list, detail, and overview.
+
 **v3.5 highlights**
 - **Unified Make Booking form** with a "recurring" toggle:
   - **Off (one-off)**: form posts to `/api/watches`. The agent attempts the booking now if the date is within 7 days, or sets a watcher to fire once when the 7-day window opens. The watcher is one-shot (won't repeatedly reschedule).
@@ -87,21 +93,26 @@ Live countdowns on the dashboard show when each recurring fires. The recurring d
 2. Enter label, username, password.
 3. The system runs a Playwright re-login immediately to verify the credentials (15-30s; the dashboard shows a spinner with status text). If it works, the state moves to `tested_ok`. If it fails, you'll see the error in the state column and the account stays `waiting` until you fix the password.
 
-## Speed budget for a scheduled fire
+## Speed budget for a scheduled fire (v3.6)
 
 | Step | Time | Notes |
 |---|---|---|
-| Session probe (T-10 min) | ~1s | Verifies the session is still alive |
-| Warm-up (T-5 min) | ~1s | Re-login if needed, bootstrap params, pre-build POST body |
-| `waitUntilExact` | drift ≤ 10ms | `setTimeout` + busy-wait last 5ms |
-| Fire (preferred court) | ~200-500ms | First POST |
-| Fallback to next court | +200ms | If preferred is taken |
-| Total | < 1s in optimistic case | |
+| Session probe (T-10 min) | ~1s | Verifies the session is still alive (per-recurring, only for accounts with an upcoming fire) |
+| **Pre-stage (T-5 min, v3.6)** | ~1s | `warmup.prepareForFire` does ensureFreshSession + bootstrapParams + builds the prebuilt form fields, stashes a fire-ready context in `fireContexts` Map |
+| **Fire (v3.6: at T)** | < 50ms | `popFireContext` + `waitUntilExact` + `tryCreateBooking`. The `setTimeout` callback is just the POST. |
+| Server response | 200ms - 8s | Varies by load. The Koorora server is the bottleneck under load, not us. `bodyTimeout` bumped to 10s in v3.6. |
+| `findBookingFor` (day-schedule re-fetch) | ~2s | Looks up the just-made booking's external_id. May miss on server cache → `booked_unverified` → 30s reconciliation |
+| Fallback to next court | +2-8s | If preferred is taken, sequentially try the rest of the apiCourts |
+| **Total pre-POST drift** | **< 50ms (v3.6)** | was 2-3s before v3.6 |
+
+A regression test (`v3.6: executeScheduledBooking — regression guard`) enforces that `prepareForFire` is NOT called in the fire path when a context is stashed. If anyone re-introduces async setup work in the hot path, the test fails.
 
 ## Daily operation
 - **Recurring scheduler** runs in-process, holds `setTimeout` timers for each upcoming fire.
-- **Per-recurring session check** is the new model — the scheduler arms a session probe at T-10min (5min before warmup). No more 24/7 cron polling.
+- **Per-recurring session check** is the model — the scheduler arms a session probe at T-10min (5min before warmup). No more 24/7 cron polling.
+- **Pre-stage at T-5min (v3.6)** does the session check, the cookie refresh, and the body build. The fire callback at T is just `setTimeout(POST)`.
 - **Fire-due-watches cron** (every 1 minute) picks up any non-recurring watches whose `date_from` is now within the 7-day window. Watches that have already fired (`fired_at IS NOT NULL`) are skipped — non-recurring bookings are one-shot.
+- **Reconcile cron (v3.6, every 30s)** fills `external_id` for `booked_unverified` bookings.
 - **Audit prune** at 03:00 trims `audit_log` rows older than `AUDIT_RETENTION_DAYS`.
 - **First-immediate retry** on the immediate path: 3 attempts, 15s apart, then writes `"3 bookings failed to succeed"` and chains to next week.
 

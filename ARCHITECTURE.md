@@ -1,12 +1,12 @@
 # Architecture — Kooroora Booking Agent
 
-> **Version:** 3.5 · **Last updated:** 2026-07-04
+> **Version:** 3.6 · **Last updated:** 2026-07-11
 > **Stack:** Node.js 20, Express, better-sqlite3 (WAL), undici, Playwright, node-cron, EJS, Caddy 2 + caddy-dns/cloudflare, Docker
 > **Live deployment:** https://bookings.boomercheugys.com
 
 This document describes how the system is wired together so a future session (or another engineer) can pick it up. It complements the user-facing `README.md` (how to use the dashboard), the operator-facing `DEPLOY.md` (how to run the server), and the dedicated design doc for the time-based booking logic at [`docs/recurring-bookings.md`](docs/recurring-bookings.md). The goal here is to explain **how it works under the hood** and **why each piece is the way it is**.
 
-## v3 → v3.5 changelog (the big picture)
+## v3 → v3.6 changelog (the big picture)
 
 - **v3.1 — Court auto-allocation**: when the user picks "any court" the system picks the first non-conflicting court automatically. See `src/agent/courtAllocator.js`.
 - **v3.2 — Unified Make Booking form**: removed Strategy, Lead days, Time end fields. Added AM/PM widget, single date picker, auto-generated label. Tooltips + field validation.
@@ -16,6 +16,11 @@ This document describes how the system is wired together so a future session (or
 - **v3.4 — Self-healing Docker**: `tools/deploy.sh` chowns the host data dir if the container's uid doesn't match; `docker-entrypoint.sh` chowns on every container start.
 - **v3.5 — Booking target on /recurring/:id**: shows what slot the next fire will book, not just when it'll fire.
 - **v3.5 — Restored non-recurring bookings**: re-added the "Make this a recurring weekly booking" toggle. When OFF, the form posts to `/api/watches` (one-shot); when ON, it posts to `/api/recurring` (weekly). New `watches.fired_at` column + `fire-due-watches` cron (every 1 min) for one-shot watches > 7 days out.
+- **v3.6 — Faster fire path**: all pre-POST work (session probe, body build, cookie hydration) now happens at T-leadMs via `warmup.prepareForFire`, not at the fire millisecond. The fire callback at T is just `setTimeout(POST)` — no more ~2-3s pre-POST drift between the fire timer firing and the actual POST going out. See §8.
+- **v3.6 — booked_unverified + reconciliation**: when the server says "booked" but the immediate day-schedule lookup doesn't see the new row (server cache / eventual consistency), the booking is recorded as `booked_unverified` instead of `confirmed`, so the user sees the truth in the dashboard and we can still cancel it. A 30s reconciliation cron re-fetches the day schedule and fills `external_id` within 30s. See §8 and §13.
+- **v3.6 — Audit log no longer stores 147KB HTML pages**: `client.request` only stores request/response bodies for non-GET requests. The `members-court-booking/` HTML page GETs are no longer captured by default. Set `AUDIT_FULL_BODIES=1` for the old behaviour. Shrinks `audit_log` by ~95% in production.
+- **v3.6 — In-flight set**: `scheduler.inFlight` prevents duplicate fires if `rescanAll` races with an in-progress fire. The fire callback returns early if the same recurringId is already firing.
+- **v3.6 — booked_on_fallback warning**: when a booking lands on a non-preferred court (the preferred court was taken at fire time), the dashboard shows a "last booking on fallback court" pill on the recurring list, recurring detail, and overview. Logs `fire.booked_on_fallback_court` with the preferred and actual courts.
 
 ---
 
@@ -160,6 +165,14 @@ audit_log(id, ts, account_id, direction, method, url, status, latency_ms,
 ### Cascade-delete chains
 - `accounts` → `sessions`, `watches`, `bookings`, `recurring_bookings`, `fire_events`, `audit_log`
 - `recurring_bookings` → `fire_events`, `bookings` (sets the FK to NULL, doesn't delete)
+
+### `audit_log` — what's in it, what's not
+
+Every HTTP call made by `client.request` writes a row to `audit_log`. The `audit.ejs` view shows the URL, method, status, latency, and error — it does NOT show request/response bodies. The dashboard audit view is a "what was the network doing" log, not a "what did the responses say" log; for that, use `fire_events.response_body` (which captures the actual booking responses, not every intermediate GET).
+
+**v3.6 body capture gate:** `client.request` only stores request/response bodies in `audit_log` for non-GET requests. The 147KB `members-court-booking/` HTML page GETs (248 rows in production) are not captured by default. This shrinks `audit_log` by ~95%. Set `AUDIT_FULL_BODIES=1` for the old behaviour (useful for deep debugging).
+
+**Retention:** rows older than `AUDIT_RETENTION_DAYS` (default 30) are pruned by the daily `0 3 * * *` cron.
 
 ### Why SQLite, not Postgres
 - Single user, single writer, no concurrent reads that need MVCC
@@ -381,46 +394,88 @@ Tested to ≤10ms drift. The whole fire sequence (waitUntilExact + 3 court POSTs
 
 ## 8. The fire path in detail
 
+The fire path is split into two phases:
+
+**Phase 1 — Pre-stage (at T-leadMs, fired by the `warmTimer`)**
+
 ```
-executeScheduledBooking(rec, fireMs):
-  prepared = prepareForFire(rec, fireMs)        # 1. warm
-    ├─ build slotForFire(rec, fireMs)           #    date + from + to in Sydney tz
-    ├─ warmup.warm(accountId, {date, from, to, courtId})
-    │   ├─ ensureFreshSession → probe → if expired, relogin
-    │   ├─ bootstrapParams if not loaded
-    │   ├─ parse cookie expiry → save to accounts.session_expires_at
-    │   └─ buildPrebuiltRequest → URLSearchParams to string, stored on client
-  
-  await waitUntilExact(fireMs)                  # 2. drift-corrected wait
-  
-  result = fireScheduled({rec, targetMs, client, primed})
-    ├─ state.transition(accountId, ATTEMPTING)
-    ├─ fireCourts(client, {date, from, to, courts, attempt: 1})
-    │   ├─ for each court in [pref, ...ascending others]:
-    │   │   ├─ build POST body (URLSearchParams)
-    │   │   ├─ write fire_event(status: 'attempting', attempt, court_attempted)
-    │   │   └─ postCreate(client, body)        # undici POST to admin-ajax.php
-    │   │       ├─ categorize(status, body, error)
-    │   │       └─ if 'booked' → return success
-    │   │       └─ if 'auth_required' → stop chain
-    │   │       └─ else → try next court
-    │   └─ return {status, body, category, courtId}
-    └─ return {...}
-  
-  recordAndPersistScheduledFire(...)            # 3. log
-    ├─ write fire_event(status, attempt, fired_at, latency_ms, response_status, response_body, error)
-    ├─ if 'booked' → write bookings row, find external_id from re-fetched schedule
-    ├─ state.transition(accountId, BOOKED or FAILED or SESSION_EXPIRED)
-    └─ recurring.setLastResult(id, {status, msg, category})
-  
-   recurring.chainToNextWeek(rec.id)            # 4. chain
-     └─ find latest fire_event, set next_fire_at = slotUtc  (v3.4: NOT + 7d)
-   
-   repo.recurring.update(id, {first_occurrence_action: 'resolved'})
-   schedule(rec.id)                              # 5. re-arm
+warmup.prepareForFire(rec, fireMs):
+  ├─ build slotForFire(rec, fireMs)              # date + from + to in Sydney tz
+  ├─ ensureFreshSession(accountId)               # HTTP probe → if expired, relogin via Playwright
+  │   ├─ client.probe() → 200 OK or relogin
+  │   └─ bootstrapParams if not loaded
+  ├─ parse cookie expiry → save to accounts.session_expires_at
+  ├─ build prebuilt form fields (action, date, from, to, user_id, fdow, ldow)
+  └─ stash fire-ready context in fireContexts Map (keyed by recurringId)
+      { recurring, client, account, targetMs, slot, apiPref, apiCourts, userId, contactId, prebuilt, preparedAt }
 ```
 
-Total budget in the optimistic case: 5s warmup at T-5min + ≤10ms drift-corrected wait + ~200ms first POST. Worst case: 5s warmup + drift + 600ms first POST (timeout) + 600ms second + 600ms third = ~2.4s total.
+**Phase 2 — Fire (at T, fired by the `fireTimer`)**
+
+```
+executeScheduledBooking(rec, fireMs):
+  if isFiring(rec.id): return                   # in_flight guard
+  markFiring(rec.id)
+  try:
+    ctx = fire.popFireContext(rec.id)           # pull the stashed context (Map.get, <1ms)
+    if !ctx:                                    # fallback if warmup didn't complete
+      ctx = await warmup.prepareForFire(rec, fireMs)  # log warning: scheduler.fire.noContext.fallback
+    
+    await time.waitUntilExact(fireMs)           # drift-corrected wait, sub-ms if target is now
+    
+    result = await fire.fireScheduledFromContext({ctx, onAttempt})
+      ├─ state.transition(accountId, ATTEMPTING)
+      ├─ fireCourts(client, {date, from, to, courts: ctx.apiCourts})
+      │   ├─ for each court in apiCourts (API ids in fallback order):
+      │   │   ├─ onAttempt → write fire_event(status: 'attempting', court_attempted)
+      │   │   └─ tryCreateBooking(client, {date, from, to, courtId})
+      │   │       └─ client.createBooking(...) via undici (shared keep-alive dispatcher with warmup)
+      │   │           ├─ categorize(status, body, error)
+      │   │           └─ if 'booked' → return success
+      │   │           └─ if 'auth_required' → stop chain
+      │   │           └─ else → try next court
+      │   └─ return {status, body, category, courtId, courtIdx}
+      └─ return {..., firedAt, ctx}
+    
+    await fire.recordAndPersistScheduledFire({ctx, result})
+      ├─ write fire_event(status, fired_at, latency_ms, response_status, response_body, error)
+      ├─ if 'booked':
+      │   ├─ findBookingFor(client, ...) → re-fetch day schedule, look up by court_id + from + to + contact_id
+      │   ├─ if found external_id → write bookings row with status='confirmed', external_id
+      │   └─ if NOT found external_id → write bookings row with status='booked_unverified'
+      │       (the 30s reconcileUnverifiedBookings cron will fill it in)
+      ├─ if booked on non-primary court (courtIdx > 0):
+      │   └─ log warn: fire.booked_on_fallback_court
+      ├─ state.transition(accountId, BOOKED or FAILED or SESSION_EXPIRED)
+      └─ recurring.setLastResult(id, {status, msg, category})
+    
+    recurring.chainToNextWeek(rec.id)            # set next_fire_at to the just-booked slot's time
+    repo.recurring.update(id, {first_occurrence_action: 'resolved'})
+  finally:
+    clearFiring(rec.id)
+  schedule(rec.id)                              # re-arm timers for next week
+```
+
+### Why pre-stage at T-leadMs?
+
+Before v3.6, the fire path called `prepareForFire` and `hydrateFromSession` AFTER the fire timer fired, costing 2-3 seconds. The Koorora server processes requests in queue order, so a 2-3s late fire loses to members who fired exactly on the hour.
+
+By moving the heavy work to T-leadMs, the fire callback at T is just `setTimeout(POST)`. The actual POST goes out within ~50ms of the target time.
+
+### Why an in_flight set?
+
+`rescanAll` runs every 5 minutes via `setInterval`. If `rescanAll` happens to fire while a fire callback is mid-execution (e.g., the fire is still waiting for a slow POST), the rescan calls `clearTimers` and then `schedule` re-arms new timers. The original fire completes, but a duplicate timer is now armed. The `inFlight` set prevents the duplicate fire callback from running.
+
+### Why the API court list (apiCourts) is pre-computed?
+
+Before v3.6, the fire path constructed the court list by mixing user-facing IDs (from `recurring.courts`) and API IDs (from `COURT_TO_API[rec.court_pref]`). The filter `c !== courtId` compared apples to oranges, so the bot was trying the literal string `"4"` as an API court ID — invalid (API range is 5/6/7). The fix: convert to API IDs once at the boundary via `fire.toApiCourts(rec)`, which always returns the preferred API id first followed by the rest in order.
+
+### Why fireEvents.response_body and audit_log both exist?
+
+- `audit_log` (set by `client.request`) captures every HTTP call — useful for the `audit.ejs` view (which shows URL/method/status/latency but not bodies) and for ad-hoc debugging.
+- `fire_events.response_body` (set by `fire.recordAndPersistScheduledFire`) is the actual booking response, focused on the fire we care about. Used by the `booking_log.ejs` view to show what the server said.
+
+Before v3.6, the booking POST went through `fire.postCreate` which bypassed `client.request` and therefore didn't write to `audit_log`. Now it goes through `client.createBooking` (which writes to `audit_log`) — so the audit view shows the actual booking POST, not just the lookup GETs.
 
 ---
 
@@ -590,11 +645,12 @@ To roll back: `tools/restore.sh` (or pick a specific file).
 
 ## 13. Cron jobs (`src/agent/jobs.js`)
 
-Three in-container cron tasks. None of them are user-facing; they're for housekeeping.
+Four in-container cron tasks. None of them are user-facing; they're for housekeeping.
 
 | Cron | What |
 |---|---|
 | `*/1 * * * *` (`fire-due-watches`) | `monitor.fireDueWatches()` — picks up non-recurring watches whose `date_from` is now within the 7-day Koorora window and fires them. Skips watches with `fired_at IS NOT NULL` so non-recurring bookings are one-shot. |
+| `*/30 * * * * *` (`reconcile`, v3.6) | `monitor.reconcileUnverifiedBookings()` — every 30s, re-fetches the day schedule for `booked_unverified` bookings and fills in `external_id`. Resolves the "confirmed in our DB but no external_id" desync. |
 | `*/10 * * * *` (`SESSION_PROBE_CRON`, legacy — v3.5 removed) | `pool.probeAll()` — checks every account's session. The v3.5 model uses per-recurring session checks in the scheduler instead. |
 | `0 3 * * *` | `repo.audit.prune(30)` — drop `audit_log` rows older than 30 days |
 | `30 2 * * *` (`BACKUP_CRON`) | Touches `/app/backups/.last-run` (the actual backup file is written by the host-side `tools/backup.sh`, which should also be in a host cron) |
@@ -602,6 +658,8 @@ Three in-container cron tasks. None of them are user-facing; they're for houseke
 The backup marker is a small JSON file with `ran_at` + `host`. The dashboard can read it to show "last backup ran X minutes ago", but currently we don't surface it in the UI — it's there for the operator.
 
 The per-recurring session check is what keeps long-lived recurring bookings from failing when the WordPress session quietly expires. v3.5 removed the 24/7 cron (`SESSION_PROBE_CRON`) in favour of "probe only when needed, only for the accounts that have an upcoming fire" — much less network traffic.
+
+The v3.6 `reconcile` cron is intentionally fine-grained (every 30s, not every minute) because its job is to fill in `external_id` for bookings that the server confirmed but our day-schedule lookup missed. A 30s wait is short enough that the user doesn't see a stuck "reconciling…" pill for long, and long enough that we don't hammer the Koorora API with hundreds of day-schedule GETs per minute across multiple accounts.
 
 ---
 
