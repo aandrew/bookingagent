@@ -1,0 +1,88 @@
+<%#
+  v5 sidebar — partial rendered next to partials/header.ejs on every
+  dashboard page. Renders three top-level items: Overview (direct),
+  Bookings (accordion with 4 children: Current Bookings, Make booking,
+  Booking log, Recurring), Settings (accordion with 3 children:
+  Settings, Accounts, Audit).
+
+  The active state is derived from currentPath (already set by
+  server.js as res.locals.currentPath). The parent item is active
+  when ANY of its children matches, AND is auto-expanded in that case
+  so the active child is visible without a second click.
+
+  Open/close + accordion behaviour lives in src/views/public/sidebar.js.
+  The CSS lives in src/views/public/dashboard.css.
+%>
+<aside class="v5-sidebar" id="v5-sidebar" aria-label="Primary navigation">
+  <div class="v5-sidebar-header">
+    <span class="v5-sidebar-logo" aria-hidden="true">▦</span>
+    <span class="v5-sidebar-app-name">Kooroora</span>
+  </div>
+
+  <div class="v5-sidebar-section-title">Navigation</div>
+
+  <a href="/" class="v5-sidebar-item <%= currentPath === '/' ? 'active' : '' %>">
+    <span class="v5-sidebar-icon" aria-hidden="true">◉</span>
+    <span class="v5-sidebar-label">Overview</span>
+  </a>
+
+  <%#
+    Bookings accordion — expanded when currentPath matches any child.
+    Children: /bookings (default), /make-booking, /booking-log, /recurring.
+  %>
+  <% const bookingsPaths = ['/bookings', '/make-booking', '/booking-log', '/fire-events', '/recurring']; %>
+  <% const bookingsActive = bookingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/')); %>
+  <button class="v5-sidebar-parent <%= bookingsActive ? 'active' : '' %>" type="button" data-sidebar-parent="bookings" aria-expanded="<%= bookingsActive ? 'true' : 'false' %>">
+    <span class="v5-sidebar-icon" aria-hidden="true">▤</span>
+    <span class="v5-sidebar-label" style="flex:1; text-align:left;">Bookings</span>
+    <span class="v5-sidebar-arrow" aria-hidden="true">›</span>
+  </button>
+  <div class="v5-sidebar-children" data-sidebar-children="bookings" aria-expanded="<%= bookingsActive ? 'true' : 'false' %>">
+    <a href="/bookings" class="v5-sidebar-child <%= currentPath === '/bookings' ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">☑</span>
+      <span class="v5-sidebar-label">Current Bookings</span>
+    </a>
+    <a href="/make-booking" class="v5-sidebar-child <%= currentPath === '/make-booking' ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">✎</span>
+      <span class="v5-sidebar-label">Make booking</span>
+    </a>
+    <a href="/booking-log" class="v5-sidebar-child <%= currentPath === '/booking-log' || currentPath.startsWith('/fire-events') ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">⌚</span>
+      <span class="v5-sidebar-label">Booking log</span>
+    </a>
+    <a href="/recurring" class="v5-sidebar-child <%= currentPath.startsWith('/recurring') ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">↻</span>
+      <span class="v5-sidebar-label">Recurring</span>
+    </a>
+  </div>
+
+  <%#
+    Settings accordion — expanded when currentPath matches any child.
+    Children: /settings (default), /accounts, /audit.
+  %>
+  <% const settingsPaths = ['/settings', '/accounts', '/audit']; %>
+  <% const settingsActive = settingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/')); %>
+  <button class="v5-sidebar-parent <%= settingsActive ? 'active' : '' %>" type="button" data-sidebar-parent="settings" aria-expanded="<%= settingsActive ? 'true' : 'false' %>">
+    <span class="v5-sidebar-icon" aria-hidden="true">⚙</span>
+    <span class="v5-sidebar-label" style="flex:1; text-align:left;">Settings</span>
+    <span class="v5-sidebar-arrow" aria-hidden="true">›</span>
+  </button>
+  <div class="v5-sidebar-children" data-sidebar-children="settings" aria-expanded="<%= settingsActive ? 'true' : 'false' %>">
+    <a href="/settings" class="v5-sidebar-child <%= currentPath === '/settings' ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">⚙</span>
+      <span class="v5-sidebar-label">Settings</span>
+    </a>
+    <a href="/accounts" class="v5-sidebar-child <%= currentPath === '/accounts' ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">☻</span>
+      <span class="v5-sidebar-label">Accounts</span>
+    </a>
+    <a href="/audit" class="v5-sidebar-child <%= currentPath === '/audit' ? 'active' : '' %>">
+      <span class="v5-sidebar-icon" aria-hidden="true">☰</span>
+      <span class="v5-sidebar-label">Audit</span>
+    </a>
+  </div>
+</aside>
+
+<%# Backdrop — only visible on mobile when the sidebar is open. The CSS
+    keeps it hidden on desktop regardless of state. %>
+<div class="v5-sidebar-backdrop" id="v5-sidebar-backdrop" aria-hidden="true"></div>

@@ -1,0 +1,261 @@
+/*
+ * v5 design system + sidebar.
+ * Hand-rolled CSS, no Tailwind, no CDN. Lives in src/views/public/ and
+ * is served at /public/dashboard.css by the existing express.static
+ * mount in src/server.js.
+ *
+ * Layering:
+ *   - The existing inline <style> in partials/header.ejs provides the
+ *     base palette + page styles (panels, pills, tables, buttons). The
+ *     v5 dashboard.css ADDS the sidebar + design tokens and DOES NOT
+ *     touch the existing palette — so existing pages render unchanged
+ *     until Phase 2 refreshes them to use the new design.
+ *   - The new tokens (--v5-*) are namespaced so they don't collide
+ *     with the existing --bg / --panel / --accent etc.
+ */
+
+:root {
+  --v5-sidebar-width: 280px;
+  --v5-sidebar-collapsed: 64px;
+  --v5-sidebar-bg: rgba(13, 28, 45, 0.92);
+  --v5-sidebar-border: rgba(255, 255, 255, 0.06);
+  --v5-sidebar-text: #d4e4fa;
+  --v5-sidebar-text-muted: #8a93a3;
+  --v5-sidebar-accent: #c3f400;
+  --v5-sidebar-accent-dim: #abd600;
+  --v5-sidebar-hover: rgba(195, 244, 0, 0.08);
+  --v5-sidebar-active: rgba(195, 244, 0, 0.14);
+  --v5-sidebar-backdrop: rgba(5, 20, 36, 0.55);
+  --v5-sidebar-radius: 0.5rem;
+  --v5-sidebar-transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --v5-content-shift: 0px;  /* set by JS when sidebar is open on desktop */
+}
+
+* { box-sizing: border-box; }
+
+/* The sidebar is fixed on the left; the existing .panel-based main
+ * content needs a left margin when the sidebar is open on desktop.
+ * The JS toggles .has-sidebar-open on <body>; CSS shifts the content
+ * via the --v5-content-shift variable. */
+body.has-sidebar-open main { margin-left: var(--v5-content-shift); transition: margin-left var(--v5-sidebar-transition); }
+body.has-sidebar-collapsed main { --v5-content-shift: var(--v5-sidebar-collapsed); }
+body:not(.has-sidebar-open) main { margin-left: 0; }
+
+@media (min-width: 1024px) {
+  body.has-sidebar-open:not(.has-sidebar-collapsed) main { --v5-content-shift: var(--v5-sidebar-width); }
+}
+
+@media (max-width: 1023px) {
+  /* Mobile: the sidebar is always a full-width overlay; the content
+   * never gets a left margin (the backdrop dims whatever's behind). */
+  body.has-sidebar-open main { margin-left: 0 !important; }
+}
+
+/* --- Sidebar --------------------------------------------------------- */
+
+.v5-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--v5-sidebar-width);
+  background: var(--v5-sidebar-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-right: 1px solid var(--v5-sidebar-border);
+  color: var(--v5-sidebar-text);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  transform: translateX(-100%);
+  transition: transform var(--v5-sidebar-transition);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
+
+@media (min-width: 1024px) {
+  /* Desktop default: sidebar visible (translateX(0)) regardless of
+   * body.has-sidebar-open, but the JS still toggles the class so
+   * icons-only mode works. The override below handles that. */
+  body:not(.has-sidebar-closed) .v5-sidebar { transform: translateX(0); }
+  body.has-sidebar-collapsed .v5-sidebar { transform: translateX(0); width: var(--v5-sidebar-collapsed); }
+  body.has-sidebar-collapsed .v5-sidebar .v5-sidebar-label,
+  body.has-sidebar-collapsed .v5-sidebar .v5-sidebar-children,
+  body.has-sidebar-collapsed .v5-sidebar .v5-sidebar-section-title { display: none; }
+  body.has-sidebar-collapsed .v5-sidebar-item { justify-content: center; padding: 10px 8px; }
+  body.has-sidebar-collapsed .v5-sidebar .v5-sidebar-header { padding: 16px 8px; }
+}
+
+@media (max-width: 1023px) {
+  /* Mobile: the JS only ever sets has-sidebar-open when the user taps
+   * the hamburger. The sidebar is fully off-screen otherwise. */
+  body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
+}
+
+/* Sidebar header (logo / app name) */
+.v5-sidebar-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--v5-sidebar-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--v5-sidebar-text);
+}
+.v5-sidebar-header .v5-sidebar-logo { font-size: 18px; }
+
+/* Section title (small uppercase label, like "Navigation") */
+.v5-sidebar-section-title {
+  padding: 14px 20px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--v5-sidebar-text-muted);
+}
+
+/* Sidebar items (top-level + accordion children) */
+.v5-sidebar-item, .v5-sidebar-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  color: var(--v5-sidebar-text-muted);
+  text-decoration: none;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  position: relative;
+  transition: background 80ms, color 80ms;
+}
+.v5-sidebar-item:hover, .v5-sidebar-child:hover {
+  background: var(--v5-sidebar-hover);
+  color: var(--v5-sidebar-text);
+}
+.v5-sidebar-item.active, .v5-sidebar-child.active {
+  background: var(--v5-sidebar-active);
+  color: var(--v5-sidebar-accent);
+}
+.v5-sidebar-item .v5-sidebar-icon, .v5-sidebar-child .v5-sidebar-icon {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.v5-sidebar-item .v5-sidebar-label, .v5-sidebar-child .v5-sidebar-label { flex: 1; }
+
+/* Accordion */
+.v5-sidebar-parent {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--v5-sidebar-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.v5-sidebar-parent:hover { background: var(--v5-sidebar-hover); color: var(--v5-sidebar-text); }
+.v5-sidebar-parent.active { color: var(--v5-sidebar-accent); }
+.v5-sidebar-parent .v5-sidebar-arrow {
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+  transition: transform var(--v5-sidebar-transition);
+  flex-shrink: 0;
+}
+.v5-sidebar-parent[aria-expanded="true"] .v5-sidebar-arrow { transform: rotate(90deg); }
+.v5-sidebar-children {
+  display: none;
+  background: rgba(0, 0, 0, 0.18);
+}
+.v5-sidebar-children[aria-expanded="true"] { display: block; }
+.v5-sidebar-child {
+  padding-left: 38px;
+  font-size: 13px;
+}
+
+/* Backdrop (mobile only — desktop doesn't need it because the sidebar
+ * pushes the content rather than overlaying). */
+.v5-sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--v5-sidebar-backdrop);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 49;
+  opacity: 0;
+  transition: opacity var(--v5-sidebar-transition);
+  pointer-events: none;
+}
+@media (max-width: 1023px) {
+  body.has-sidebar-open .v5-sidebar-backdrop { display: block; opacity: 1; pointer-events: auto; }
+}
+
+/* --- Hamburger (top-nav) -------------------------------------------- */
+
+.v5-hamburger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted, #8a93a3);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.v5-hamburger:hover { color: var(--text, #e6e8eb); border-color: var(--line, #262c36); }
+.v5-hamburger[aria-expanded="true"] { color: var(--v5-sidebar-accent); border-color: var(--v5-sidebar-accent); }
+
+/* Hide the hamburger on desktop if the sidebar is open + not collapsed
+ * (the sidebar is permanently visible, the user has icons-only to
+ * collapse it). When the sidebar IS collapsed on desktop, the hamburger
+ * is needed to re-open. We let the JS toggle a .show-hamburger class
+ * to control this. */
+.v5-hamburger { display: none; }
+@media (max-width: 1023px) {
+  /* Mobile: always show the hamburger */
+  .v5-hamburger { display: inline-flex; }
+}
+@media (min-width: 1024px) {
+  /* Desktop: hamburger visible only when sidebar is collapsed */
+  body.has-sidebar-collapsed .v5-hamburger { display: inline-flex; }
+}
+
+/* --- Reduced motion ------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .v5-sidebar,
+  .v5-sidebar-parent .v5-sidebar-arrow,
+  .v5-sidebar-backdrop,
+  body.has-sidebar-open main {
+    transition: none !important;
+  }
+}
+
+/* --- Scrollbar styling for the sidebar ----------------------------- */
+.v5-sidebar::-webkit-scrollbar { width: 6px; }
+.v5-sidebar::-webkit-scrollbar-track { background: transparent; }
+.v5-sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.06); border-radius: 3px; }
+.v5-sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* --- Live indicator nudge (v4 footer dot still works) --------------- */
+/* The footer indicator is rendered by partials/footer.ejs inline. v5
+ * just nudges its position so it sits clear of the sidebar. */
+body.has-sidebar-open footer { padding-left: calc(var(--v5-content-shift) + 18px); transition: padding-left var(--v5-sidebar-transition); }
+@media (max-width: 1023px) {
+  body.has-sidebar-open footer { padding-left: 18px !important; }
+}

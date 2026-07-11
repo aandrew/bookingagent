@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%= typeof title !== 'undefined' ? title : 'Kooroo Agent' %></title>
+  <link rel="stylesheet" href="/public/dashboard.css">
   <style>
     :root { --bg:#0f1115; --panel:#171a21; --panel2:#1f242d; --text:#e6e8eb; --muted:#8a93a3; --accent:#5ee0a7; --warn:#f0c674; --err:#e06c75; --line:#262c36; --info:#7ebec5; }
     * { box-sizing: border-box; }
@@ -12,9 +13,9 @@
     a:hover { text-decoration: underline; }
     header.top { display:flex; align-items:center; gap: 1rem; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
     header.top h1 { font-size: 16px; margin:0; letter-spacing: .2px; }
-    header.top nav { display:flex; gap: 14px; margin-left: 1.5rem; }
-    header.top nav a { color: var(--muted); }
-    header.top nav a.active { color: var(--text); }
+    /* v5: top nav no longer carries the page links — they live in the
+       sidebar. The top nav now holds the hamburger toggle (left), the
+       app title (left), the user label + logout (right). */
     header.top .spacer { flex:1; }
     header.top .who { color: var(--muted); font-size: 12px; }
     main { padding: 18px; max-width: 1200px; margin: 0 auto; }
@@ -73,24 +74,21 @@
 </head>
 <body>
   <header class="top">
-    <h1>🎾 Kooroora Booking Agent</h1>
     <% if (user) { %>
-      <nav>
-        <a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">Overview</a>
-        <a href="/make-booking" class="<%= currentPath.startsWith('/make-booking') ? 'active' : '' %>">Make Booking</a>
-        <a href="/bookings" class="<%= currentPath.startsWith('/bookings') ? 'active' : '' %>">Current Bookings</a>
-        <a href="/booking-log" class="<%= currentPath.startsWith('/booking-log') || currentPath.startsWith('/fire-events') ? 'active' : '' %>">Booking log</a>
-        <a href="/accounts" class="<%= currentPath.startsWith('/accounts') ? 'active' : '' %>">Accounts</a>
-        <a href="/audit" class="<%= currentPath.startsWith('/audit') ? 'active' : '' %>">Audit</a>
-        <a href="/settings" class="<%= currentPath.startsWith('/settings') ? 'active' : '' %>">Settings</a>
-      </nav>
-      <span class="spacer"></span>
+      <button class="v5-hamburger" type="button" aria-label="Toggle navigation" aria-expanded="false">≡</button>
+    <% } %>
+    <h1>🎾 Kooroora Booking Agent</h1>
+    <span class="spacer"></span>
+    <% if (user) { %>
       <span class="who"><%= user.username %></span>
       <form action="/logout" method="post" class="inline">
         <button class="secondary" type="submit">Logout</button>
       </form>
     <% } %>
   </header>
+  <% if (user) { %>
+    <%- include('sidebar') %>
+  <% } %>
   <main>
     <% if (user && typeof activeErrors !== 'undefined' && activeErrors && activeErrors.length) { %>
       <% activeErrors.forEach(function(err) { %>

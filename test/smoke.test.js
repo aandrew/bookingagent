@@ -1051,6 +1051,282 @@ test('v4: live.js exposes KoorooLive API + defensive handler wrapping', () => {
   KL._reset();
 });
 
+// v5: sidebar tests. Load sidebar.js in a vm sandbox with a minimal DOM
+// and verify the public API (open/close/toggle/setAccordion/snapshot).
+// These tests are pure JS — no real DOM, no real browser. The CSS layer
+// (sliding animation, mobile breakpoint) is tested by inspection.
+test('v5: sidebar.js exposes KoorooSidebar API + open/close/toggle/accordion', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const sidebarSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'sidebar.js'), 'utf8');
+
+  // Build a sandbox with a minimal DOM and a small set of elements
+  // that the sidebar code expects. The trick: capture addEventListener
+  // calls so we can drive the click handlers from the test.
+  function makeEl(tag, id) {
+    const el = {
+      tagName: (tag || 'div').toUpperCase(),
+      id: id || null,
+      children: [],
+      attrs: id ? { id } : {},
+      classList: {
+        _set: new Set(),
+        add(c) { this._set.add(c); },
+        remove(c) { this._set.delete(c); },
+        contains(c) { return this._set.has(c); },
+        toggle(c, on) { if (on === undefined) { if (this._set.has(c)) this._set.delete(c); else this._set.add(c); } else if (on) { this._set.add(c); } else { this._set.delete(c); } },
+      },
+      style: {},
+      _listeners: {},
+      addEventListener(name, fn) { (this._listeners[name] = this._listeners[name] || []).push(fn); },
+      removeEventListener(name, fn) { if (this._listeners[name]) this._listeners[name] = this._listeners[name].filter(f => f !== fn); },
+      setAttribute(k, v) { this.attrs[k] = v; },
+      getAttribute(k) { return this.attrs[k]; },
+      click() { (this._listeners.click || []).forEach(fn => fn({ preventDefault() {} })); },
+      focus() {},
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    };
+    return el;
+  }
+
+  const body = makeEl('body');
+  body.classList._set = new Set();
+
+  // The sidebar code creates the backdrop + queries the hamburger. We
+  // hand it a fixed DOM tree that returns the right elements.
+  const hamburger = makeEl('button');
+  hamburger.classList._set = new Set(['v5-hamburger']);
+  const backdrop = makeEl('div', 'v5-sidebar-backdrop');
+  backdrop.classList._set = new Set(['v5-sidebar-backdrop']);
+  const sidebar = makeEl('aside');
+  sidebar.classList._set = new Set(['v5-sidebar']);
+
+  const queryMap = {
+    '.v5-hamburger': hamburger,
+    '#v5-sidebar-backdrop': backdrop,
+    '.v5-sidebar-parent': null,
+    '.v5-sidebar-children': null,
+  };
+  body.querySelector = function (sel) { return queryMap[sel] || null; };
+  body.querySelectorAll = function (sel) { return []; };
+  body.children = [sidebar];
+  body.getElementById = function (id) { return id === 'v5-sidebar-backdrop' ? backdrop : null; };
+
+  // Stub matchMedia
+  function matchMedia(query) {
+    return { matches: false, media: query, addEventListener() {}, removeEventListener() {} };
+  }
+
+  // localStorage stub
+  const lsStore = {};
+  const ls = {
+    getItem(k) { return Object.prototype.hasOwnProperty.call(lsStore, k) ? lsStore[k] : null; },
+    setItem(k, v) { lsStore[k] = String(v); },
+    removeItem(k) { delete lsStore[k]; },
+  };
+
+  const sandbox = {
+    window: { addEventListener() {}, innerWidth: 1280 },
+    document: {
+      body: body,
+      readyState: 'complete',
+      addEventListener() {},
+      querySelector: body.querySelector.bind(body),
+      querySelectorAll: body.querySelectorAll.bind(body),
+      getElementById: body.getElementById.bind(body),
+    },
+    localStorage: ls,
+    matchMedia: matchMedia,
+    console: { error() {}, log() {} },
+    setTimeout: (fn, ms) => { return 0; }, // synchronous; don't run callbacks
+    clearTimeout: () => {},
+  };
+  sandbox.self = sandbox;
+  sandbox.global = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(sidebarSrc, sandbox);
+
+  const SB = sandbox.window.KoorooSidebar;
+  assert.equal(typeof SB, 'object', 'KoorooSidebar should be exposed');
+  assert.equal(typeof SB.open, 'function');
+  assert.equal(typeof SB.close, 'function');
+  assert.equal(typeof SB.toggle, 'function');
+  assert.equal(typeof SB.setAccordion, 'function');
+  assert.equal(typeof SB.snapshot, 'function');
+
+  // Default state: desktop (1280px) → sidebar is open
+  const snap1 = SB.snapshot();
+  assert.equal(snap1.viewport, 'desktop');
+  assert.equal(snap1.open, true, 'desktop default should be open');
+  assert.equal(snap1.collapsed, false);
+
+  // Toggle: desktop toggles collapsed (icons-only)
+  SB.toggle();
+  assert.equal(body.classList.contains('has-sidebar-collapsed'), true, 'desktop toggle should collapse');
+  assert.equal(body.classList.contains('has-sidebar-open'), true, 'collapsed desktop should still be open');
+  assert.equal(lsStore['v5.sidebar.collapsed'], '1', 'collapsed state should persist');
+
+  // Toggle again: back to full
+  SB.toggle();
+  assert.equal(body.classList.contains('has-sidebar-collapsed'), false);
+  assert.equal(lsStore['v5.sidebar.collapsed'], '0');
+});
+
+test('v5: sidebar default-open on desktop, default-closed on mobile (per persisted state)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const sidebarSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'sidebar.js'), 'utf8');
+
+  function runInContext(viewport) {
+    const lsStore = {};
+    const classes = new Set();
+    const classList = {
+      add(c) { classes.add(c); },
+      remove(c) { classes.delete(c); },
+      contains(c) { return classes.has(c); },
+      toggle(c, on) { if (on === undefined) { if (classes.has(c)) classes.delete(c); else classes.add(c); } else if (on) { classes.add(c); } else { classes.delete(c); } },
+    };
+    const body = { classList, addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, getElementById() { return null; } };
+    const sandbox = {
+      window: { addEventListener() {}, innerWidth: viewport },
+      document: { body, readyState: 'complete', addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, getElementById: body.getElementById.bind(body) },
+      localStorage: { getItem(k) { return lsStore[k] || null; }, setItem(k, v) { lsStore[k] = String(v); }, removeItem(k) { delete lsStore[k]; } },
+      matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; },
+      console: { error() {}, log() {} },
+      setTimeout() { return 0; },
+      clearTimeout() {},
+    };
+    sandbox.self = sandbox; sandbox.global = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(sidebarSrc, sandbox);
+    return { snap: sandbox.window.KoorooSidebar.snapshot(), ls: lsStore };
+  }
+
+  // Share the localStorage across runs to test persistence
+  const sharedLs = {};
+  function runOnce(viewport) {
+    const body = { classList: { _set: new Set(), add(c) { this._set.add(c); }, remove(c) { this._set.delete(c); }, contains(c) { return this._set.has(c); }, toggle(c, on) { if (on === undefined) { if (this._set.has(c)) this._set.delete(c); else this._set.add(c); } else if (on) { this._set.add(c); } else { this._set.delete(c); } } }, addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, getElementById() { return null; } };
+    const sandbox = {
+      window: { addEventListener() {}, innerWidth: viewport },
+      document: { body, readyState: 'complete', addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, getElementById: body.getElementById.bind(body) },
+      localStorage: { getItem: k => Object.prototype.hasOwnProperty.call(sharedLs, k) ? sharedLs[k] : null, setItem: (k, v) => { sharedLs[k] = String(v); }, removeItem: k => { delete sharedLs[k]; } },
+      matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; },
+      console: { error() {}, log() {} },
+      setTimeout() { return 0; }, clearTimeout() {},
+    };
+    sandbox.self = sandbox; sandbox.global = sandbox;
+    vm.createContext(sandbox);
+    vm.runInContext(sidebarSrc, sandbox);
+    return sandbox.window.KoorooSidebar.snapshot();
+  }
+
+  // Desktop with no prior state → open
+  let snap = runOnce(1280);
+  assert.equal(snap.viewport, 'desktop');
+  assert.equal(snap.open, true, 'desktop default is open');
+
+  // Mobile with no prior state → closed (always — we don't persist
+  // an "I want mobile open by default" preference; the user opens
+  // it manually each session).
+  snap = runOnce(800);
+  assert.equal(snap.viewport, 'mobile');
+  assert.equal(snap.open, false, 'mobile default is closed');
+  assert.equal(snap.closed, true);
+
+  // Persist collapsed state on desktop, then re-run → still open but
+  // icons-only. This proves the collapsed state is persisted.
+  sharedLs['v5.sidebar.collapsed'] = '1';
+  snap = runOnce(1280);
+  assert.equal(snap.open, true, 'collapsed desktop sidebar is still open');
+  assert.equal(snap.collapsed, true, 'collapsed state should be respected');
+});
+
+test('v5: sidebar accordion: single open at a time (opening one closes others)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const sidebarSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'sidebar.js'), 'utf8');
+
+  // Build a DOM with two parent buttons + their children divs. The
+  // accordion function queries '[data-sidebar-parent="<name>"]' and
+  // '[data-sidebar-children="<name>"]' to set aria-expanded.
+  function makeEl(tag) {
+    return {
+      tagName: tag.toUpperCase(),
+      attrs: {},
+      classList: { _set: new Set(), add(c) { this._set.add(c); }, remove(c) { this._set.delete(c); }, contains(c) { return this._set.has(c); }, toggle(c, on) { if (on === undefined) { if (this._set.has(c)) this._set.delete(c); else this._set.add(c); } else if (on) { this._set.add(c); } else { this._set.delete(c); } } },
+      addEventListener() {},
+      setAttribute(k, v) { this.attrs[k] = v; },
+      getAttribute(k) { return this.attrs[k]; },
+    };
+  }
+  const parents = {};
+  const children = {};
+  function reg(name) {
+    const p = makeEl('button'); p.attrs['data-sidebar-parent'] = name; p.attrs['aria-expanded'] = 'false';
+    const c = makeEl('div'); c.attrs['data-sidebar-children'] = name; c.attrs['aria-expanded'] = 'false';
+    parents[name] = p; children[name] = c;
+  }
+  reg('bookings');
+  reg('settings');
+  const allElements = [parents.bookings, parents.settings, children.bookings, children.settings];
+  const body = {
+    classList: { add() {}, remove() {}, contains() { return false; } },
+    addEventListener() {},
+    querySelector(sel) {
+      const m = sel.match(/\[data-sidebar-parent="([^"]+)"\]/);
+      if (m) return parents[m[1]] || null;
+      const m2 = sel.match(/\[data-sidebar-children="([^"]+)"\]/);
+      if (m2) return children[m2[1]] || null;
+      return null;
+    },
+    querySelectorAll(sel) {
+      if (sel === '.v5-sidebar-parent[aria-expanded="true"]') {
+        return allElements.filter(e => e.attrs['data-sidebar-parent'] && e.attrs['aria-expanded'] === 'true');
+      }
+      return [];
+    },
+    getElementById() { return null; },
+  };
+  const sandbox = {
+    window: { addEventListener() {}, innerWidth: 1280 },
+    document: { body, readyState: 'complete', addEventListener() {}, querySelector: body.querySelector.bind(body), querySelectorAll: body.querySelectorAll.bind(body), getElementById: body.getElementById.bind(body) },
+    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+    matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; },
+    console: { error() {}, log() {} },
+    setTimeout() { return 0; }, clearTimeout() {},
+  };
+  sandbox.self = sandbox; sandbox.global = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(sidebarSrc, sandbox);
+  const SB = sandbox.window.KoorooSidebar;
+
+  // Both start closed
+  assert.equal(parents.bookings.attrs['aria-expanded'], 'false');
+  assert.equal(parents.settings.attrs['aria-expanded'], 'false');
+
+  // Open bookings
+  SB.setAccordion('bookings', true);
+  assert.equal(parents.bookings.attrs['aria-expanded'], 'true');
+  assert.equal(children.bookings.attrs['aria-expanded'], 'true');
+  assert.equal(parents.settings.attrs['aria-expanded'], 'false');
+
+  // Open settings → bookings should auto-close
+  SB.setAccordion('settings', true);
+  assert.equal(parents.settings.attrs['aria-expanded'], 'true');
+  assert.equal(parents.bookings.attrs['aria-expanded'], 'false', 'opening one accordion closes the other');
+  assert.equal(children.bookings.attrs['aria-expanded'], 'false');
+  assert.equal(children.settings.attrs['aria-expanded'], 'true');
+
+  // Close settings
+  SB.setAccordion('settings', false);
+  assert.equal(parents.settings.attrs['aria-expanded'], 'false');
+  assert.equal(children.settings.attrs['aria-expanded'], 'false');
+});
+
 test('v3.6: fire.categorize — user_quota_exceeded is distinct from already_booked', () => {
   // v3.6: when the Koorora server returns
   //   "Booking this time will push you over the maximum number of hours

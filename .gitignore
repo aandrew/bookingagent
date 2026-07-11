@@ -15,3 +15,6 @@ npm-debug.log*
 dist/
 coverage/
 test/live/
+# External design assets (assessments, proof-of-concepts) — keep
+# out of the codebase. The v5 redesign lives in src/views/.
+design/
