@@ -33,7 +33,7 @@
   <% const bookingsPaths = ['/bookings', '/make-booking', '/booking-log', '/fire-events', '/recurring']; %>
   <% const bookingsActive = bookingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/')); %>
   <button class="v5-sidebar-parent <%= bookingsActive ? 'active' : '' %>" type="button" data-sidebar-parent="bookings" aria-expanded="<%= bookingsActive ? 'true' : 'false' %>">
-    <span class="v5-sidebar-icon" aria-hidden="true">▤</span>
+    <span class="v5-sidebar-icon" aria-hidden="true">◉</span>
     <span class="v5-sidebar-label" style="flex:1; text-align:left;">Bookings</span>
     <span class="v5-sidebar-arrow" aria-hidden="true">▸</span>
   </button>
@@ -63,7 +63,7 @@
   <% const settingsPaths = ['/settings', '/accounts', '/audit']; %>
   <% const settingsActive = settingsPaths.some(p => currentPath === p || currentPath.startsWith(p + '/')); %>
   <button class="v5-sidebar-parent <%= settingsActive ? 'active' : '' %>" type="button" data-sidebar-parent="settings" aria-expanded="<%= settingsActive ? 'true' : 'false' %>">
-    <span class="v5-sidebar-icon" aria-hidden="true">⚙</span>
+    <span class="v5-sidebar-icon" aria-hidden="true">◉</span>
     <span class="v5-sidebar-label" style="flex:1; text-align:left;">Settings</span>
     <span class="v5-sidebar-arrow" aria-hidden="true">▸</span>
   </button>

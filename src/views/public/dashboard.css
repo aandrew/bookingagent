@@ -129,7 +129,9 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
 /* Sidebar items (top-level + accordion children). v5.1: the parent
  * (Bookings / Settings) and the item (Overview / direct links) now
  * share the same padding, gap, and color rules — the parent just
- * adds an arrow on the right. */
+ * adds an arrow on the right. We also reset <button> user-agent
+ * defaults (background, border, color, margin, font, appearance)
+ * so the parent <button> elements render identically to the <a> items. */
 .v5-sidebar-item, .v5-sidebar-child, .v5-sidebar-parent {
   display: flex;
   align-items: center;
@@ -143,8 +145,13 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
   text-align: left;
   font: inherit;
   font-size: 14px;
+  line-height: 1.4;
   cursor: pointer;
   position: relative;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  margin: 0;
   transition: background 80ms, color 80ms;
 }
 .v5-sidebar-item:hover, .v5-sidebar-child:hover, .v5-sidebar-parent:hover {
@@ -161,6 +168,7 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
   width: 22px;
   text-align: center;
   flex-shrink: 0;
+  line-height: 1;
 }
 .v5-sidebar-item .v5-sidebar-label, .v5-sidebar-child .v5-sidebar-label, .v5-sidebar-parent .v5-sidebar-label { flex: 1; }
 

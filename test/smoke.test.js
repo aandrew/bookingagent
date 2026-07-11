@@ -1382,6 +1382,18 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
   // 3. Sidebar arrow is the more visible ▸ (was ›, which was too small)
   assert.match(sidebarSrc, /v5-sidebar-arrow[^>]*>▸</, 'sidebar arrow must be the filled triangle ▸, not the small ›');
 
+  // 3a. v5.1.1: all three top-level sidebar items use the same icon. We
+  // used to use ▤ and ⚙ for Bookings/Settings but those don't render
+  // reliably in the system font stack, producing a missing-glyph box
+  // that visually broke the button. The Overview (◉) renders
+  // everywhere, so all three parent items use it.
+  const parentIconMatches = sidebarSrc.match(/data-sidebar-parent="[^"]+"[\s\S]*?v5-sidebar-icon[^>]*>(.)<\/span>/g) || [];
+  assert.ok(parentIconMatches.length >= 2, 'should have at least 2 sidebar parent items with icons');
+  const parentIcons = parentIconMatches.map(m => m.match(/>(.)<\/span>/)[1]);
+  for (const ic of parentIcons) {
+    assert.equal(ic, '◉', 'every sidebar parent icon must be ◉ (was ▤ or ⚙, which broke in the system font)');
+  }
+
   // 4. Dashboard CSS has the new v5.1 pieces
   assert.match(dashboardSrc, /\.v5-topnav\s*\{/, 'dashboard.css must define .v5-topnav');
   assert.match(dashboardSrc, /\.v5-topnav-item\s*\{/, 'dashboard.css must define .v5-topnav-item');
