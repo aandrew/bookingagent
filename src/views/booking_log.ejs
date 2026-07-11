@@ -2,7 +2,7 @@
 <div class="panel">
   <h2>Booking log</h2>
   <p class="muted">Every attempt the agent has made to book a recurring slot. <code>booked</code> means a booking was made; <code>no_time_available</code> means the slot was already taken; <code>technical_error</code> is a network / auth / server issue.</p>
-  <table>
+  <table class="fire-events">
     <thead><tr><th>Time</th><th>Recurring</th><th>Account</th><th>Status</th><th>Court</th><th>Latency</th><th>Error</th></tr></thead>
     <tbody>
     <% events.forEach(function(e) { %>
@@ -27,3 +27,66 @@
   </table>
 </div>
 <%- include('partials/footer') %>
+
+<script>
+  // v4: live handler for the booking log. fire_event_created prepends
+  // a row. Defensive: ignores updates for rows that don't exist on
+  // this page.
+  (function setupLiveBookingLog() {
+    if (typeof KoorooLive === 'undefined') return;
+    function el(tag, attrs, children) {
+      const node = document.createElement(tag);
+      if (attrs) for (const k in attrs) {
+        if (k === 'class') node.className = attrs[k];
+        else if (k === 'text') node.textContent = attrs[k];
+        else if (k === 'href') node.setAttribute('href', attrs[k]);
+        else node.setAttribute(k, attrs[k]);
+      }
+      if (children) for (const c of children) node.appendChild(c);
+      return node;
+    }
+    function flash(tr) { tr.classList.add('flash-update'); setTimeout(function () { tr.classList.remove('flash-update'); }, 1500); }
+    function statusPill(s) {
+      let cls = '';
+      if (s === 'booked') cls = 'ok';
+      else if (s === 'no_time_available') cls = 'warn';
+      else if (s === 'technical_error') cls = 'err';
+      else if (s === 'attempting') cls = 'info';
+      return el('span', { class: 'pill ' + cls, text: s || '' });
+    }
+    function fmtLatency(ms) { return ms ? ms + 'ms' : ''; }
+
+    KoorooLive.on('fire_event_created', function (e) {
+      if (!e || !e.id) return;
+      // Respect the recurring filter on this page (if any)
+      const urlParams = new URLSearchParams(window.location.search);
+      const filterRecurringId = urlParams.get('recurring_id');
+      const filterStatus = urlParams.get('status');
+      if (filterRecurringId && String(e.recurring_id) !== String(filterRecurringId)) return;
+      if (filterStatus && e.status !== filterStatus) return;
+      const tbody = document.querySelector('table.fire-events tbody');
+      if (!tbody) return;
+      const tr = el('tr', { 'data-fire-event-id': String(e.id) });
+      tr.appendChild(el('td', { class: 'muted', text: e.fired_at || e.scheduled_at || '' }));
+      const recurringTd = el('td');
+      if (e.recurring_id) {
+        const a = el('a', { href: '/recurring/' + e.recurring_id, text: '#' + e.recurring_id });
+        recurringTd.appendChild(a);
+      }
+      tr.appendChild(recurringTd);
+      tr.appendChild(el('td', { text: e.account_username || e.account_label || (e.account_id ? '#' + e.account_id : '') }));
+      tr.appendChild(el('td', null, [statusPill(e.status)]));
+      tr.appendChild(el('td', { text: e.court_booked || e.court_attempted || '—' }));
+      tr.appendChild(el('td', { class: 'muted', text: fmtLatency(e.latency_ms) }));
+      const errTd = el('td', { class: 'muted', style: 'max-width: 240px; overflow:hidden; text-overflow:ellipsis;', title: e.error || '' });
+      errTd.textContent = e.error || '';
+      tr.appendChild(errTd);
+      tbody.insertBefore(tr, tbody.firstChild);
+      flash(tr);
+    });
+  })();
+</script>
+<style>
+  .flash-update { animation: flash-update-fade 1.5s ease-out; }
+  @keyframes flash-update-fade { 0% { background: rgba(94, 224, 167, 0.25); } 100% { background: transparent; } }
+</style>

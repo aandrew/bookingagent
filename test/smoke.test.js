@@ -736,6 +736,321 @@ test('v3.6: booked_on_fallback detection in route helpers', () => {
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
 
+// ---- v4: live push events (SSE + bus) ----
+
+test('v4: bus.subscribe receives emitted events', () => {
+  const bus = require('../src/agent/bus');
+  bus.reset();
+  const received = [];
+  const unsubscribe = bus.subscribe({
+    dead: false, buffer: [], droppedEvents: 0,
+    write(name, data) { received.push({ name, data: JSON.parse(data) }); },
+    close() {},
+  });
+  bus.emit('test_event', { hello: 'world', n: 42 });
+  bus.emit('another', { ok: true });
+  assert.equal(received.length, 2);
+  assert.equal(received[0].name, 'test_event');
+  assert.deepEqual(received[0].data, { hello: 'world', n: 42 });
+  assert.equal(received[1].name, 'another');
+  unsubscribe();
+  bus.emit('after_unsubscribe', {});
+  assert.equal(received.length, 2, 'unsubscriber should not receive further events');
+  bus.reset();
+});
+
+test('v4: bus dead subscriber is cleaned up on next emit', () => {
+  const bus = require('../src/agent/bus');
+  bus.reset();
+  const live = [];
+  bus.subscribe({ dead: false, buffer: [], droppedEvents: 0, write(n, d) { live.push(JSON.parse(d).v); }, close() {} });
+  const dead = { dead: false, buffer: [], droppedEvents: 0, write() { throw new Error('I am dead'); }, close() {} };
+  bus.subscribe(dead);
+  bus.emit('x', { v: 1 });
+  bus.emit('x', { v: 2 });
+  assert.deepEqual(live, [1, 2]);
+  assert.equal(bus.stats().subscribers, 1, 'dead subscriber should be cleaned up');
+  assert.equal(dead.dead, true);
+  bus.reset();
+});
+
+test('v4: bus.emit never throws to caller (defensive)', () => {
+  const bus = require('../src/agent/bus');
+  bus.reset();
+  bus.subscribe({ dead: false, buffer: [], droppedEvents: 0, write() { throw new Error('boom'); }, close() {} });
+  let threw = null;
+  try { bus.emit('safe_emit', { x: 1 }); } catch (e) { threw = e; }
+  assert.equal(threw, null, 'bus.emit must NEVER throw to the caller');
+  bus.reset();
+});
+
+test('v4: state.transition emits account_updated (skipped when state unchanged)', () => {
+  const bus = require('../src/agent/bus');
+  const EV = require('../src/agent/bus-events');
+  const state = require('../src/agent/state');
+  const repo = require('../src/db/repo');
+  bus.reset();
+  const received = [];
+  bus.subscribe({ dead: false, buffer: [], droppedEvents: 0, write(n, d) { if (n === EV.ACCOUNT_UPDATED) received.push(JSON.parse(d)); }, close() {} });
+  const a = repo.accounts.create({ label: 'bus', username: 'bususer', password: 'p' });
+  state.transition(a.id, state.STATES.TESTED_OK, 'test 1');
+  assert.equal(received.length, 1);
+  assert.equal(received[0].id, a.id);
+  assert.equal(received[0].state, 'tested_ok');
+  // No-op transition (tested_ok → tested_ok) should NOT emit
+  state.transition(a.id, state.STATES.TESTED_OK, 'still tested');
+  assert.equal(received.length, 1, 'no-op transition should be suppressed');
+  // Real transition should emit
+  state.transition(a.id, state.STATES.TOKEN_READY, 'probe ok');
+  assert.equal(received.length, 2);
+  assert.equal(received[1].state, 'token_ready');
+  // The emitted payload must NOT contain the password
+  assert.equal(received[0].password, undefined);
+  repo.accounts.remove(a.id);
+  bus.reset();
+});
+
+test('v4: recurring.add emits recurring_created; recurring.update emits recurring_updated', () => {
+  const bus = require('../src/agent/bus');
+  const EV = require('../src/agent/bus-events');
+  const recurring = require('../src/agent/recurring');
+  const repo = require('../src/db/repo');
+  bus.reset();
+  const created = [];
+  const updated = [];
+  bus.subscribe({ dead: false, buffer: [], droppedEvents: 0,
+    write(n, d) {
+      const p = JSON.parse(d);
+      if (n === EV.RECURRING_CREATED) created.push(p);
+      if (n === EV.RECURRING_UPDATED) updated.push(p);
+    },
+    close() {},
+  });
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'bus', username: 'bususer2', password: 'p' });
+  const r = recurring.add({ account_id: a.id, label: 'bus', day_of_week: 3, time: '19:00', court_pref: '4' });
+  assert.equal(created.length, 1);
+  assert.equal(created[0].id, r.id);
+  recurring.update(r.id, { time: '20:00' });
+  assert.equal(updated.length, 1);
+  assert.equal(updated[0].time, '20:00');
+  repo.accounts.remove(a.id);
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  bus.reset();
+});
+
+test('v4: heartbeatIntervalMs ramps from 2s near a fire to 30s baseline', () => {
+  const scheduler = require('../src/agent/scheduler');
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  const a = repo.accounts.create({ label: 'hb', username: 'hbuser', password: 'p' });
+  // No fires, no in-flight → 30s default
+  const slow = scheduler.heartbeatIntervalMs();
+  assert.equal(slow, 30_000, 'no fire within 5 min should be 30s');
+  // Fire in 2 minutes → between 2s and 30s
+  const inTwoMin = new Date(Date.now() + 2 * 60_000).toISOString();
+  repo.recurring.create({
+    account_id: a.id, label: 'soon', court_pref: '4', courts: ['4'],
+    day_of_week: 3, time: '19:00', duration_mins: 60, lead_minutes: 10,
+    enabled: 1, first_occurrence_action: 'book_now', next_fire_at: inTwoMin,
+  });
+  const ramp = scheduler.heartbeatIntervalMs();
+  assert.ok(ramp >= 2_000 && ramp < 30_000, `ramp interval should be 2-30s, got ${ramp}`);
+  // Fire in 5s → 2s
+  const rec = repo.recurring.list({ enabled: true })[0];
+  repo.recurring.update(rec.id, { next_fire_at: new Date(Date.now() + 5_000).toISOString() });
+  const fast = scheduler.heartbeatIntervalMs();
+  assert.equal(fast, 2_000, 'fire in 5s should be 2s heartbeat');
+  // Fire in the past → 2s
+  repo.recurring.update(rec.id, { next_fire_at: new Date(Date.now() - 1000).toISOString() });
+  const past = scheduler.heartbeatIntervalMs();
+  assert.equal(past, 2_000, 'past fire should be 2s heartbeat');
+  // Cleanup
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  repo.accounts.remove(a.id);
+});
+
+test('v4: SSE endpoint requires auth (302 redirect to /login)', async () => {
+  const http = require('http');
+  const express = require('express');
+  const session = require('express-session');
+  const cookieParser = require('cookie-parser');
+  const sseHandler = require('../src/routes/sse');
+  const { requireAdmin } = require('../src/routes/_mw');
+  const testApp = express();
+  testApp.use(cookieParser());
+  testApp.use(session({ secret: 'test', resave: false, saveUninitialized: true }));
+  testApp.get('/api/events', requireAdmin, sseHandler);
+  const srv = http.createServer(testApp);
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path: '/api/events', method: 'GET' }, (res) => {
+        resolve(res.statusCode);
+        res.resume();
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    assert.equal(status, 302, `unauthenticated SSE should redirect (302), got ${status}`);
+  } finally {
+    srv.close();
+  }
+});
+
+test('v4: SSE endpoint streams events to a connected client', async () => {
+  const http = require('http');
+  const express = require('express');
+  const session = require('express-session');
+  const cookieParser = require('cookie-parser');
+  const sseHandler = require('../src/routes/sse');
+  const { requireAdmin } = require('../src/routes/_mw');
+  const testApp = express();
+  testApp.use(cookieParser());
+  testApp.use(session({ secret: 'test', resave: false, saveUninitialized: true }));
+  // Fake auth middleware
+  testApp.use((req, res, next) => { req.session.user = { role: 'admin', username: 'tester' }; next(); });
+  testApp.get('/api/events', (req, res, next) => { req.session.user = { role: 'admin', username: 'tester' }; sseHandler(req, res); });
+  const srv = http.createServer(testApp);
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  const bus = require('../src/agent/bus');
+  bus.reset();
+  try {
+    // Open the SSE connection, collect the first few frames
+    const collected = [];
+    const req = http.request({ host: '127.0.0.1', port, path: '/api/events', method: 'GET' });
+    req.on('response', (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        collected.push(chunk);
+        if (collected.length >= 2) req.destroy();
+      });
+    });
+    req.on('error', () => {});
+    req.end();
+    await new Promise(r => setTimeout(r, 100));
+    // Emit an event
+    bus.emit('test_sse', { hello: 'world' });
+    await new Promise(r => setTimeout(r, 200));
+    req.destroy();
+    const text = collected.join('');
+    assert.ok(text.includes('event: test_sse'), `SSE should include event name, got: ${text.slice(0, 200)}`);
+    assert.ok(text.includes('"hello":"world"'), `SSE should include JSON data, got: ${text.slice(0, 200)}`);
+  } finally {
+    srv.close();
+    bus.reset();
+  }
+});
+
+// v4: frontend test for live.js — load the script in a sandboxed VM with
+// a minimal EventSource mock. Verifies the API surface (on/off/fire),
+// the error wrapping (a thrown handler doesn't kill the connection),
+// and the reconnect-with-backoff behaviour.
+test('v4: live.js exposes KoorooLive API + defensive handler wrapping', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const vm = require('vm');
+  const liveSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'live.js'), 'utf8');
+
+  // Minimal browser-ish sandbox
+  const eventSourceInstances = [];
+  class FakeEventSource {
+    constructor(url, opts) {
+      this.url = url; this.opts = opts; this.readyState = 0; this.listeners = {};
+      eventSourceInstances.push(this);
+    }
+    addEventListener(name, fn) {
+      (this.listeners[name] = this.listeners[name] || []).push(fn);
+    }
+    close() { this.readyState = 2; }
+    // test helpers
+    _open() { this.readyState = 1; (this.listeners.open || []).forEach(fn => fn()); }
+    _error(closed) {
+      this.readyState = closed ? 2 : 0;
+      (this.listeners.error || []).forEach(fn => fn());
+    }
+    _event(name, data) {
+      const ev = { data: typeof data === 'string' ? data : JSON.stringify(data) };
+      (this.listeners[name] || []).forEach(fn => fn(ev));
+    }
+  }
+  const sandbox = {
+    window: { addEventListener() {} },
+    // readyState: 'complete' so live.js's auto-connect fires synchronously
+    // (live.js only auto-connects on DOMContentLoaded if readyState is
+    // 'loading'; if 'complete' it connects immediately).
+    document: { body: { dataset: {} }, readyState: 'complete', addEventListener() {} },
+    EventSource: FakeEventSource,
+    console: { error() {} },
+    setTimeout: () => 0, // run synchronously
+    clearTimeout: () => {},
+  };
+  sandbox.self = sandbox;
+  sandbox.global = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(liveSrc, sandbox);
+
+  const KL = sandbox.window.KoorooLive;
+  assert.equal(typeof KL.on, 'function');
+  assert.equal(typeof KL.off, 'function');
+  assert.equal(typeof KL.connect, 'function');
+  assert.equal(typeof KL.snapshot, 'function');
+
+  // Auto-connect fired; there should be one EventSource instance.
+  assert.equal(eventSourceInstances.length, 1);
+  const es = eventSourceInstances[0];
+  assert.equal(es.url, '/api/events');
+  es._open();
+  assert.equal(KL.snapshot().connected, true);
+
+  // Register a handler + emit a fake event
+  const seen = [];
+  const off = KL.on('booking_created', function (b) { seen.push(b); });
+  es._event('booking_created', { id: 7, status: 'confirmed' });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].id, 7);
+  // Unregister and verify it stops
+  off();
+  es._event('booking_created', { id: 8 });
+  assert.equal(seen.length, 1);
+
+  // Defensive: a thrown handler doesn't kill the bus
+  KL.on('fire_event_created', function () { throw new Error('boom'); });
+  let threw = null;
+  try { es._event('fire_event_created', { id: 1 }); } catch (e) { threw = e; }
+  assert.equal(threw, null, 'a thrown handler must not propagate to the EventSource');
+
+  // Malformed JSON is ignored
+  let threw2 = null;
+  try { es._event('account_updated', 'this is not json{'); } catch (e) { threw2 = e; }
+  assert.equal(threw2, null, 'malformed event data must not throw');
+
+  // Error → reconnect with backoff
+  KL._reset();
+  eventSourceInstances.length = 0;
+  KL.connect();
+  es._error(false); // CONNECTING state — just update UI
+  assert.equal(KL.snapshot().connected, false);
+  // Error → CLOSED state — schedule reconnect
+  KL._reset();
+  eventSourceInstances.length = 0;
+  KL.connect();
+  const es2 = eventSourceInstances[0];
+  es2._error(true);
+  assert.equal(KL.snapshot().connected, false);
+  assert.equal(KL.snapshot().reconnectAttempt, 1);
+
+  // disconnect() prevents subsequent connect() calls
+  KL.disconnect();
+  eventSourceInstances.length = 0;
+  const beforeCount = eventSourceInstances.length;
+  KL.connect();
+  assert.equal(eventSourceInstances.length, beforeCount, 'disconnect() must prevent subsequent connect()');
+  // Reset for cleanliness
+  KL._reset();
+});
+
 test('v3.6: fire.categorize — user_quota_exceeded is distinct from already_booked', () => {
   // v3.6: when the Koorora server returns
   //   "Booking this time will push you over the maximum number of hours

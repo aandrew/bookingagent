@@ -6,6 +6,8 @@ const { timeToSlot, slotToTime } = require('../kooroo/client');
 const { withClient } = require('./pool');
 const repo = require('../db/repo');
 const log = require('../logger');
+const bus = require('./bus');
+const EV = require('./bus-events');
 
 function watchMatchesSlot(slot, watch) {
   if (watch.court && String(slot.court_id) !== String(watch.court)) return false;
@@ -86,7 +88,7 @@ async function runWatch(watch) {
     if (cr.status >= 200 && cr.status < 300) {
       const found = await findBookingFor(client, { date, from, to, court_id: courtId });
       const externalId = found?.id || null;
-      repo.bookings.create({
+      const newBooking = repo.bookings.create({
         account_id: account.id,
         watch_id: watch.id,
         court: String(courtId),
@@ -102,6 +104,8 @@ async function runWatch(watch) {
       // fire-due-watches cron doesn't keep retrying.
       repo.watches.setFired(watch.id);
       log.info('monitor.booked', { watch: watch.id, account: account.username, courtId, from, to, date });
+      // v4: emit booking_created so /bookings updates live.
+      try { bus.emit(EV.BOOKING_CREATED, newBooking); } catch (e) { log.warn('bus.emit.failed', { event: EV.BOOKING_CREATED, error: e.message }); }
       return { status: 'booked', http: cr.status, body: cr.body, externalId };
     }
     repo.bookings.create({

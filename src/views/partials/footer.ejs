@@ -1,4 +1,53 @@
   </main>
+  <footer style="display: flex; justify-content: space-between; align-items: center; padding: 8px 18px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); margin-top: 18px;">
+    <span>v3.6 — Kooroora Booking Agent</span>
+    <span id="live-indicator" title="Live updates status" style="display: inline-flex; align-items: center; gap: 6px; cursor: default;">
+      <span id="live-dot" style="width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block;"></span>
+      <span id="live-text">offline</span>
+    </span>
+  </footer>
+  <script src="/public/live.js"></script>
+  <script>
+    // v4: live indicator status updater. Subscribes to KoorooLive's
+    // _live_status pseudo-event (fires on every event + on connect/disconnect)
+    // and updates the footer dot + text + tooltip.
+    (function setupLiveIndicator() {
+      if (typeof KoorooLive === 'undefined') return;
+      const dot = document.getElementById('live-dot');
+      const text = document.getElementById('live-text');
+      const ind = document.getElementById('live-indicator');
+      if (!dot || !text || !ind) return;
+      function fmtAge(ms) {
+        if (ms <= 0) return 'never';
+        var s = Math.floor(ms / 1000);
+        if (s < 60) return s + 's ago';
+        var m = Math.floor(s / 60);
+        if (m < 60) return m + 'm ago';
+        var h = Math.floor(m / 60);
+        return h + 'h ago';
+      }
+      KoorooLive.on('_live_status', function (snap) {
+        if (snap.connected) {
+          if (snap.stale) {
+            dot.style.background = 'var(--warn)';
+            text.textContent = 'live (stale)';
+          } else {
+            dot.style.background = 'var(--accent)';
+            text.textContent = 'live';
+          }
+        } else if (snap.reconnectAttempt > 0) {
+          dot.style.background = 'var(--warn)';
+          text.textContent = 'reconnecting';
+        } else {
+          dot.style.background = 'var(--muted)';
+          text.textContent = 'offline';
+        }
+        ind.title = snap.connected
+          ? 'Live updates connected.\nLast event: ' + fmtAge(Date.now() - snap.lastEventTime) + '.'
+          : 'Live updates not connected. The page still works (static). Reconnect attempt: ' + snap.reconnectAttempt + '.';
+      });
+    })();
+  </script>
   <script>
     async function jsonReq(url, opts) {
       const r = await fetch(url, { headers: { 'content-type': 'application/json' }, ...opts });

@@ -19,6 +19,8 @@ const SESSION_LEAD_MS = 7 * 24 * 3600_000;  // 7 days
 function isFiring(recurringId) { return inFlight.has(recurringId); }
 function markFiring(recurringId) { inFlight.add(recurringId); }
 function clearFiring(recurringId) { inFlight.delete(recurringId); }
+function isFiringAny() { return inFlight.size > 0; }
+function inFlightIds() { return [...inFlight]; }
 
 function clearTimers(id) {
   const t = timers.get(id);
@@ -243,7 +245,41 @@ function nextBookingTarget(rec) {
   return slotForFire(rec, fireMs);
 }
 
-module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, nextBookingTarget, prepareForFire, isFiring, SESSION_LEAD_MS };
+module.exports = { start, stop, schedule, rescanAll, listActive, executeImmediateBooking, executeScheduledBooking, slotForFire, nextBookingTarget, prepareForFire, isFiring, isFiringAny, inFlightIds, msUntilNextFire, heartbeatIntervalMs, SESSION_LEAD_MS };
 // backward-compat aliases
 module.exports.executeImmediateFire = module.exports.executeImmediateBooking;
 module.exports.executeScheduledFire = module.exports.executeScheduledBooking;
+
+// v4: smart heartbeat interval for the SSE endpoint. Fast (2s) when a
+// fire is imminent OR a fire is currently in flight (we want quick
+// detection of a dead connection so we don't miss a booking result).
+// Ramps back to a slow default (30s) as the next fire recedes. The
+// linear ramp is 2s at T-0, 30s at T-300s+, smooth in between.
+const HEARTBEAT_FAST_MS = 2_000;
+const HEARTBEAT_SLOW_MS = 30_000;
+const HEARTBEAT_RAMP_FIRE_MS = 300_000; // 5 min — beyond this, full slow
+
+function msUntilNextFire() {
+  let best = null;
+  try {
+    const repo = require('../db/repo');
+    for (const r of repo.recurring.list({ enabled: true })) {
+      if (!r.next_fire_at) continue;
+      const t = new Date(r.next_fire_at).getTime();
+      if (Number.isFinite(t) && (best == null || t < best)) best = t;
+    }
+  } catch {}
+  if (best == null) return Infinity;
+  return best - Date.now();
+}
+
+function heartbeatIntervalMs() {
+  if (inFlight.size > 0) return HEARTBEAT_FAST_MS;
+  const ms = msUntilNextFire();
+  if (!Number.isFinite(ms)) return HEARTBEAT_SLOW_MS;
+  // Linear ramp: 2s at T-0, 30s at T-300s+
+  if (ms <= 0) return HEARTBEAT_FAST_MS;
+  if (ms >= HEARTBEAT_RAMP_FIRE_MS) return HEARTBEAT_SLOW_MS;
+  // ms/10 = the desired interval in seconds, but bounded.
+  return Math.max(HEARTBEAT_FAST_MS, Math.min(HEARTBEAT_SLOW_MS, Math.ceil(ms / 10)));
+}

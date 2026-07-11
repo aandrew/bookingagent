@@ -45,47 +45,47 @@
   <% if (flash && flash.type === 'ok' && flash.message && flash.message.match(/^Added/)) { %>
     <div class="flash ok auto-dismiss" data-flash><%= flash.message %></div>
   <% } %>
-  <table>
+  <table class="recurring">
     <thead><tr><th>#</th><th>Label</th><th>Account</th><th>Pattern</th><th>First action</th><th>Next attempt</th><th>Last result</th><th>Enabled</th><th></th></tr></thead>
     <tbody>
-    <% recurringRows.forEach(function(r) { %>
-      <tr>
-        <td><%= r.id %></td>
-        <td><a href="/recurring/<%= r.id %>"><%= r.label %></a></td>
-        <td><%= r.account_username || r.account_label || ('#' + r.account_id) %></td>
-        <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %> <%= r.duration_mins %>m <% if (r.courts.length > 1) { %>+ fb<%= r.courts.filter(c => c !== r.court_pref).join(',') %><% } %></td>
-        <td>
-          <% if (r.first_occurrence_action === 'book_now') { %><span class="pill warn">book now</span>
-          <% } else if (r.first_occurrence_action === 'resolved') { %><span class="pill ok">resolved</span>
-          <% } else { %><span class="pill info">scheduled</span><% } %>
-          <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="The most recent successful fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>. Check the recurring detail for more.">on fallback court</span></div><% } %>
-        </td>
-        <td>
-          <% if (r.next_fire_at) { %><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span>
-          <% } else { %>—<% } %>
-        </td>
-        <td>
-          <% if (r.last_error_category === 'no_courts_available') { %><span class="pill err">no courts available</span>
-          <% } else if (r.last_error_category === 'user_quota_exceeded') { %><span class="pill warn" title="The member has already booked the maximum number of hours they're allowed today on the Koorora site (likely from direct bookings). Free up the quota or disable the recurring.">user quota exceeded</span>
-          <% } else if (r.last_error_category === 'already_booked') { %><span class="pill warn" title="Another member took the slot between the warmup and the fire. The next attempt will try again next week.">slot taken by member</span>
-          <% } else if (r.last_error_category === 'court_invalid') { %><span class="pill err">court invalid</span>
-          <% } else if (r.last_error_category === 'window_not_open') { %><span class="pill warn">window not open</span>
-          <% } else if (r.last_status === 'booked') { %><span class="pill ok">booked</span>
-          <% } else if (r.last_status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
-          <% } else if (r.last_status === 'technical_error' || r.last_status === 'failed') { %><span class="pill err">technical_error</span>
-          <% } else if (r.last_status) { %><span class="pill"><%= r.last_status %></span>
-          <% } else { %>—<% } %>
-          <% if (r.last_msg) { %><div class="muted" style="font-size:11px;"><%= r.last_msg %></div><% } %>
-        </td>
-        <td><%= r.enabled ? 'yes' : 'no' %></td>
-        <td>
-          <button class="secondary" onclick="bookNowBtn(<%= r.id %>)">Book now</button>
-          <button class="secondary" onclick="toggleRecurring(<%= r.id %>, <%= !r.enabled %>)"><%= r.enabled ? 'Disable' : 'Enable' %></button>
-          <button class="danger" onclick="removeRecurring(<%= r.id %>)">Delete</button>
-        </td>
-      </tr>
-    <% }) %>
-    <% if (!recurringRows.length) { %><tr><td colspan="8" class="muted">No recurring bookings yet.</td></tr><% } %>
+      <% recurringRows.forEach(function(r) { %>
+        <tr data-recurring-id="<%= r.id %>">
+          <td><%= r.id %></td>
+          <td><a href="/recurring/<%= r.id %>"><%= r.label %></a></td>
+          <td><%= r.account_username || r.account_label || ('#' + r.account_id) %></td>
+          <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %> <%= r.duration_mins %>m <% if (r.courts.length > 1) { %>+ fb<%= r.courts.filter(c => c !== r.court_pref).join(',') %><% } %></td>
+          <td>
+            <% if (r.first_occurrence_action === 'book_now') { %><span class="pill warn">book now</span>
+            <% } else if (r.first_occurrence_action === 'resolved') { %><span class="pill ok">resolved</span>
+            <% } else { %><span class="pill info">scheduled</span><% } %>
+            <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="The most recent successful fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>. Check the recurring detail for more.">on fallback court</span></div><% } %>
+          </td>
+          <td>
+            <% if (r.next_fire_at) { %><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span>
+            <% } else { %>—<% } %>
+          </td>
+          <td class="last-result-cell">
+            <% if (r.last_error_category === 'no_courts_available') { %><span class="pill err">no courts available</span>
+            <% } else if (r.last_error_category === 'user_quota_exceeded') { %><span class="pill warn" title="The member has already booked the maximum number of hours they're allowed today on the Koorora site (likely from direct bookings). Free up the quota or disable the recurring.">user quota exceeded</span>
+            <% } else if (r.last_error_category === 'already_booked') { %><span class="pill warn" title="Another member took the slot between the warmup and the fire. The next attempt will try again next week.">slot taken by member</span>
+            <% } else if (r.last_error_category === 'court_invalid') { %><span class="pill err">court invalid</span>
+            <% } else if (r.last_error_category === 'window_not_open') { %><span class="pill warn">window not open</span>
+            <% } else if (r.last_status === 'booked') { %><span class="pill ok">booked</span>
+            <% } else if (r.last_status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
+            <% } else if (r.last_status === 'technical_error' || r.last_status === 'failed') { %><span class="pill err">technical_error</span>
+            <% } else if (r.last_status) { %><span class="pill"><%= r.last_status %></span>
+            <% } else { %>—<% } %>
+            <% if (r.last_msg) { %><div class="muted" style="font-size:11px;"><%= r.last_msg %></div><% } %>
+          </td>
+          <td><%= r.enabled ? 'yes' : 'no' %></td>
+          <td>
+            <button class="secondary" onclick="bookNowBtn(<%= r.id %>)">Book now</button>
+            <button class="secondary" onclick="toggleRecurring(<%= r.id %>, <%= !r.enabled %>)"><%= r.enabled ? 'Disable' : 'Enable' %></button>
+            <button class="danger" onclick="removeRecurring(<%= r.id %>)">Delete</button>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (!recurringRows.length) { %><tr><td colspan="8" class="muted">No recurring bookings yet.</td></tr><% } %>
     </tbody>
   </table>
 </div>
@@ -115,3 +115,125 @@
   }
 </script>
 <%- include('partials/footer') %>
+
+<script>
+  // v4: live handler for the recurring list. recurring_created prepends
+  // a row; recurring_updated updates next_fire_at + last_status in
+  // place. Defensive — if the row is missing (e.g. deleted), we skip
+  // rather than crash.
+  (function setupLiveRecurring() {
+    if (typeof KoorooLive === 'undefined') return;
+    function el(tag, attrs, children) {
+      const node = document.createElement(tag);
+      if (attrs) for (const k in attrs) {
+        if (k === 'class') node.className = attrs[k];
+        else if (k === 'text') node.textContent = attrs[k];
+        else if (k === 'href') node.setAttribute('href', attrs[k]);
+        else if (k === 'onclick') node.setAttribute('onclick', attrs[k]);
+        else node.setAttribute(k, attrs[k]);
+      }
+      if (children) for (const c of children) node.appendChild(c);
+      return node;
+    }
+    function flash(tr) { tr.classList.add('flash-update'); setTimeout(function () { tr.classList.remove('flash-update'); }, 1500); }
+    function fmtCountdown(t) {
+      const d = t - Date.now();
+      if (d <= 0) return 'now';
+      const days = Math.floor(d / 86400000);
+      const hours = Math.floor((d % 86400000) / 3600000);
+      const mins = Math.floor((d % 3600000) / 60000);
+      const secs = Math.floor((d % 60000) / 1000);
+      return days + 'd ' + String(hours).padStart(2,'0') + ':' + String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0');
+    }
+    function statusPill(r) {
+      if (r.last_error_category === 'no_courts_available') return el('span', { class: 'pill err', text: 'no courts available' });
+      if (r.last_error_category === 'user_quota_exceeded') return el('span', { class: 'pill warn', text: 'user quota exceeded' });
+      if (r.last_error_category === 'already_booked') return el('span', { class: 'pill warn', text: 'slot taken by member' });
+      if (r.last_error_category === 'court_invalid') return el('span', { class: 'pill err', text: 'court invalid' });
+      if (r.last_error_category === 'window_not_open') return el('span', { class: 'pill warn', text: 'window not open' });
+      if (r.last_status === 'booked') return el('span', { class: 'pill ok', text: 'booked' });
+      if (r.last_status === 'no_time_available') return el('span', { class: 'pill warn', text: 'no_time_available' });
+      if (r.last_status === 'technical_error' || r.last_status === 'failed') return el('span', { class: 'pill err', text: 'technical_error' });
+      if (r.last_status) return el('span', { class: 'pill', text: r.last_status });
+      return el('span', { class: 'muted', text: '—' });
+    }
+    function updateLastResultCell(tr, r) {
+      const cell = tr.querySelector('.last-result-cell');
+      if (!cell) return;
+      cell.innerHTML = '';
+      cell.appendChild(statusPill(r));
+      if (r.last_msg) {
+        const m = el('div', { class: 'muted', style: 'font-size:11px;', text: r.last_msg });
+        cell.appendChild(m);
+      }
+    }
+    function buildRow(r) {
+      const tr = el('tr', { 'data-recurring-id': String(r.id) });
+      tr.appendChild(el('td', { text: String(r.id) }));
+      const labelTd = el('td');
+      const a = el('a', { href: '/recurring/' + r.id, text: r.label || '' });
+      labelTd.appendChild(a);
+      if (r.last_error_category === 'no_courts_available') {
+        const d = el('div'); d.appendChild(el('span', { class: 'pill err', text: 'no courts available' })); labelTd.appendChild(d);
+      }
+      tr.appendChild(labelTd);
+      tr.appendChild(el('td', { text: r.account_username || r.account_label || ('#' + r.account_id) }));
+      const info = el('td', { class: 'muted' });
+      info.textContent = 'Court ' + r.court_pref + ' ' + r.time + ' ' + r.duration_mins + 'm';
+      tr.appendChild(info);
+      tr.appendChild(el('td', null, [el('span', { class: r.first_occurrence_action === 'book_now' ? 'pill warn' : 'pill info', text: r.first_occurrence_action === 'book_now' ? 'book now' : (r.first_occurrence_action === 'resolved' ? 'resolved' : 'scheduled') })]));
+      const countdownTd = el('td');
+      if (r.next_fire_at) {
+        const span = el('span', { class: 'countdown', 'data-fire-at': String(new Date(r.next_fire_at).getTime()) });
+        span.textContent = '…';
+        countdownTd.appendChild(span);
+      } else { countdownTd.textContent = '—'; }
+      tr.appendChild(countdownTd);
+      const lastResultTd = el('td', { class: 'last-result-cell' });
+      lastResultTd.appendChild(statusPill(r));
+      if (r.last_msg) {
+        const m = el('div', { class: 'muted', style: 'font-size:11px;', text: r.last_msg });
+        lastResultTd.appendChild(m);
+      }
+      tr.appendChild(lastResultTd);
+      tr.appendChild(el('td', { text: r.enabled ? 'yes' : 'no' }));
+      const actionTd = el('td');
+      const bookBtn = el('button', { class: 'secondary', type: 'button' });
+      bookBtn.textContent = 'Book now';
+      bookBtn.setAttribute('onclick', 'bookNowBtn(' + r.id + ')');
+      actionTd.appendChild(bookBtn);
+      const toggleBtn = el('button', { class: 'secondary', type: 'button' });
+      toggleBtn.textContent = r.enabled ? 'Disable' : 'Enable';
+      toggleBtn.setAttribute('onclick', 'toggleRecurring(' + r.id + ', ' + (!r.enabled) + ')');
+      actionTd.appendChild(toggleBtn);
+      const delBtn = el('button', { class: 'danger', type: 'button' });
+      delBtn.textContent = 'Delete';
+      delBtn.setAttribute('onclick', 'removeRecurring(' + r.id + ')');
+      actionTd.appendChild(delBtn);
+      tr.appendChild(actionTd);
+      return tr;
+    }
+    KoorooLive.on('recurring_created', function (r) {
+      if (!r || !r.id) return;
+      const tbody = document.querySelector('table.recurring tbody');
+      if (!tbody) return;
+      const existing = tbody.querySelector('tr[data-recurring-id="' + r.id + '"]');
+      if (existing) return;
+      tbody.insertBefore(buildRow(r), tbody.firstChild);
+      flash(tbody.querySelector('tr[data-recurring-id="' + r.id + '"]'));
+    });
+    KoorooLive.on('recurring_updated', function (r) {
+      if (!r || !r.id) return;
+      const tr = document.querySelector('tr[data-recurring-id="' + r.id + '"]');
+      if (!tr) return;
+      const countdown = tr.querySelector('[data-fire-at]');
+      if (countdown && r.next_fire_at) countdown.setAttribute('data-fire-at', String(new Date(r.next_fire_at).getTime()));
+      updateLastResultCell(tr, r);
+      flash(tr);
+    });
+  })();
+</script>
+<style>
+  .flash-update { animation: flash-update-fade 1.5s ease-out; }
+  @keyframes flash-update-fade { 0% { background: rgba(94, 224, 167, 0.25); } 100% { background: transparent; } }
+</style>

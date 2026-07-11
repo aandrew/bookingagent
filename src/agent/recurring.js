@@ -7,6 +7,8 @@ const warmup = require('./warmup');
 const fire = require('./fire');
 const courtAllocator = require('./courtAllocator');
 const log = require('../logger');
+const bus = require('./bus');
+const EV = require('./bus-events');
 const config = require('../config');
 const endpoints = require('../kooroo/endpoints.json');
 const { KoorooClient } = require('../kooroo/client');
@@ -134,6 +136,13 @@ function add(input) {
   if (alloc.no_courts_available) {
     presented.no_courts_available = true;
   }
+  // v4: emit recurring_created so the dashboard can prepend the row.
+  try { bus.emit(EV.RECURRING_CREATED, presented); } catch (e) { log.warn('bus.emit.failed', { event: EV.RECURRING_CREATED, error: e.message }); }
+  // v4: if the row was created in an error state (no_courts_available),
+  // emit error_appeared so the error banner shows up immediately.
+  if (alloc.no_courts_available) {
+    try { bus.emit(EV.ERROR_APPEARED, presented); } catch (e) { log.warn('bus.emit.failed', { event: EV.ERROR_APPEARED, error: e.message }); }
+  }
   return presented;
 }
 
@@ -181,11 +190,23 @@ function update(id, fields) {
     const firstOccurrenceUtc = time.nextWeekdayAt(updated.day_of_week, updated.time, { after: Date.now() });
     repo.recurring.update(id, { first_occurrence_action: 'book_now', next_fire_at: new Date(firstOccurrenceUtc).toISOString() });
   }
-  return present(repo.recurring.get(id));
+  const finalRecurring = present(repo.recurring.get(id));
+  // v4: emit recurring_updated so the dashboard reflects the new
+  // court / time / next_fire_at. Wrap in try/catch.
+  try { bus.emit(EV.RECURRING_UPDATED, finalRecurring); } catch (e) { log.warn('bus.emit.failed', { event: EV.RECURRING_UPDATED, error: e.message }); }
+  return finalRecurring;
 }
 
 function remove(id) {
   return repo.recurring.remove(id);
+}
+
+// v4: dismiss an error — wraps repo.recurring.dismissError and emits
+// the corresponding SSE event so the error banner disappears live.
+function dismissError(id) {
+  const r = repo.recurring.dismissError(id);
+  try { bus.emit(EV.ERROR_DISMISSED, { id }); } catch (e) { log.warn('bus.emit.failed', { event: EV.ERROR_DISMISSED, error: e.message }); }
+  return r;
 }
 
 function list(opts) {
@@ -250,7 +271,7 @@ async function bookNow(recurringId, opts = {}) {
   return { category: result.category, result };
 }
 
-module.exports = { add, update, remove, list, get, present, validate, normalize, chainToNextWeek, bookNow, computeFallbackOrder, ALLOWED_COURTS, COURT_TO_API, API_TO_COURT };
+module.exports = { add, update, remove, list, get, present, validate, normalize, chainToNextWeek, bookNow, dismissError, computeFallbackOrder, ALLOWED_COURTS, COURT_TO_API, API_TO_COURT };
 // backward-compat alias
 const _origFireNow = module.exports.bookNow;
 if (!module.exports.fireNow) module.exports.fireNow = _origFireNow;

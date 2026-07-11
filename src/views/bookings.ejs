@@ -32,11 +32,11 @@
 
 <div class="panel">
   <h2>Confirmed bookings</h2>
-  <table>
-    <thead><tr><th>#</th><th>Account</th><th>When</th><th>Court</th><th>Status</th><th>External ID</th><th>Created</th><th></th></tr></thead>
+      <table class="bookings">
+        <thead><tr><th>#</th><th>Account</th><th>When</th><th>Court</th><th>Status</th><th>External ID</th><th>Created</th><th></th></tr></thead>
     <tbody>
     <% bookings.forEach(function(b) { %>
-      <tr>
+      <tr data-booking-id="<%= b.id %>">
         <td><%= b.id %></td>
         <td><%= b.account_username || b.account_label || ('#' + b.account_id) %></td>
         <td><%= b.date %> <%= b.start_time %>–<%= b.end_time %></td>
@@ -71,3 +71,103 @@
   }
 </script>
 <%- include('partials/footer') %>
+
+<script>
+  // v4: live handler for the bookings table. booking_created prepends a
+  // row; booking_updated updates the status pill / external_id cell in
+  // place. Every handler is wrapped by KoorooLive's try/catch.
+  (function setupLiveBookings() {
+    if (typeof KoorooLive === 'undefined') return;
+    function el(tag, attrs, children) {
+      const node = document.createElement(tag);
+      if (attrs) for (const k in attrs) {
+        if (k === 'class') node.className = attrs[k];
+        else if (k === 'text') node.textContent = attrs[k];
+        else if (k === 'html') node.innerHTML = attrs[k];
+        else node.setAttribute(k, attrs[k]);
+      }
+      if (children) for (const c of children) node.appendChild(c);
+      return node;
+    }
+    function flash(tr) {
+      tr.classList.add('flash-update');
+      setTimeout(function () { tr.classList.remove('flash-update'); }, 1500);
+    }
+    function statusPill(s) {
+      let cls = 'err';
+      if (s === 'confirmed') cls = 'ok';
+      else if (s === 'booked_unverified') cls = 'warn';
+      else if (s === 'cancelled') cls = '';
+      return el('span', { class: 'pill ' + cls, text: s || '' });
+    }
+    function fmtRange(date, start, end) { return (date || '') + ' ' + (start || '') + '–' + (end || ''); }
+
+    KoorooLive.on('booking_created', function (b) {
+      if (!b || !b.id) return;
+      const tbody = document.querySelector('table.bookings tbody');
+      if (!tbody) return;
+      // If the row already exists (e.g. server-rendered + live), skip
+      const existing = tbody.querySelector('tr[data-booking-id="' + b.id + '"]');
+      if (existing) return;
+      const tr = el('tr', { 'data-booking-id': String(b.id) });
+      tr.appendChild(el('td', { text: String(b.id) }));
+      tr.appendChild(el('td', { text: b.account_username || b.account_label || ('#' + b.account_id) }));
+      tr.appendChild(el('td', { text: fmtRange(b.date, b.start_time, b.end_time) }));
+      tr.appendChild(el('td', { text: b.court || '' }));
+      const statusTd = el('td', null, [statusPill(b.status)]);
+      tr.appendChild(statusTd);
+      tr.appendChild(el('td', { class: 'muted', text: b.external_id || (b.status === 'booked_unverified' ? '…' : '') }));
+      tr.appendChild(el('td', { class: 'muted', text: b.created_at || '' }));
+      // Action cell — Cancel button only for confirmed
+      const actionTd = el('td');
+      if (b.status === 'confirmed') {
+        const btn = el('button', { class: 'danger', type: 'button' });
+        btn.textContent = 'Cancel';
+        btn.setAttribute('onclick', 'cancelBooking(' + b.id + ')');
+        actionTd.appendChild(btn);
+      } else if (b.status === 'booked_unverified') {
+        const span = el('span', { class: 'muted', title: 'Wait for the 30s reconciliation job to fill external_id, then this button will appear' });
+        span.textContent = 'reconciling…';
+        actionTd.appendChild(span);
+      }
+      tr.appendChild(actionTd);
+      tbody.insertBefore(tr, tbody.firstChild);
+      flash(tr);
+    });
+
+    KoorooLive.on('booking_updated', function (b) {
+      if (!b || !b.id) return;
+      const tr = document.querySelector('tr[data-booking-id="' + b.id + '"]');
+      if (!tr) return;
+      // Update status pill
+      const pillTd = tr.children[4];
+      if (pillTd) {
+        pillTd.innerHTML = '';
+        pillTd.appendChild(statusPill(b.status));
+      }
+      // Update external_id cell
+      const extTd = tr.children[5];
+      if (extTd) extTd.textContent = b.external_id || (b.status === 'booked_unverified' ? '…' : '');
+      // Update action cell
+      const actionTd = tr.children[6];
+      if (actionTd) {
+        actionTd.innerHTML = '';
+        if (b.status === 'confirmed') {
+          const btn = el('button', { class: 'danger', type: 'button' });
+          btn.textContent = 'Cancel';
+          btn.setAttribute('onclick', 'cancelBooking(' + b.id + ')');
+          actionTd.appendChild(btn);
+        } else if (b.status === 'booked_unverified') {
+          const span = el('span', { class: 'muted', title: 'Wait for the 30s reconciliation job to fill external_id, then this button will appear' });
+          span.textContent = 'reconciling…';
+          actionTd.appendChild(span);
+        }
+      }
+      flash(tr);
+    });
+  })();
+</script>
+<style>
+  .flash-update { animation: flash-update-fade 1.5s ease-out; }
+  @keyframes flash-update-fade { 0% { background: rgba(94, 224, 167, 0.25); } 100% { background: transparent; } }
+</style>

@@ -21,17 +21,30 @@
     if (!a) return '#' + auditOrRec.account_id;
     return format.truncate(a.username, 12);
   }
+  // Serialized for the live-update handler (uses data attributes to find rows)
+  const USER_LOOKUP_JSON = JSON.stringify(
+    Object.fromEntries(accounts.map(a => [a.id, a.username])),
+    null, 0
+  ).replace(/</g, '\\u003c');
+  // Pill class lookup for account state (mirrors the rendering above)
+  const STATE_PILL_CLASS = {
+    'waiting': 'info', 'tested_ok': 'info', 'token_ready': 'info',
+    'primed': 'warn', 'attempting': 'warn',
+    'booked': 'ok', 'failed': 'err',
+    'session_expired': 'err', 'login_required': 'err', 'error': 'err',
+  };
+  const STATE_PILL_CLASS_JSON = JSON.stringify(STATE_PILL_CLASS);
 %>
 
 <div class="row">
   <div class="panel">
     <h2>Upcoming bookings (next 6)</h2>
     <div class="table-wrap">
-      <table>
+      <table class="upcoming-bookings">
         <thead><tr><th>Label</th><th>Account</th><th data-hide-sm="1">Info</th><th>Next attempt</th><th>Action</th></tr></thead>
         <tbody>
         <% upcoming.forEach(function(r) { %>
-          <tr>
+          <tr data-recurring-id="<%= r.id %>">
             <td><a href="/bookings"><%= r.label %></a>
               <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
               <% if (r.last_error_category === 'user_quota_exceeded') { %><div><span class="pill warn" title="The member has already booked the maximum number of hours they're allowed today on the Koorora site.">user quota exceeded</span></div><% } %>
@@ -40,7 +53,7 @@
             <td><%= acctCell(r) %></td>
             <td class="muted" data-hide-sm="1">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
             <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
-            <td><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
+            <td class="last-result"><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
           </tr>
         <% }) %>
         <% if (!upcoming.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/make-booking">Make Booking</a>.</td></tr><% } %>
@@ -74,7 +87,7 @@
   <div class="panel">
     <h2>Recent booking attempts</h2>
     <div class="table-wrap">
-      <table>
+      <table class="fire-events">
         <thead><tr><th>Time</th><th>Status</th><th>Court</th><th data-hide-sm="1">Latency</th></tr></thead>
         <tbody>
         <% fireEvents.forEach(function(e) { %>
@@ -107,15 +120,16 @@
       <thead><tr><th>#</th><th>Label</th><th>User</th><th>State</th><th data-hide-sm="1">Last check</th></tr></thead>
       <tbody>
       <% accounts.forEach(function(a) { %>
-        <tr>
+        <tr data-account-id="<%= a.id %>">
           <td><%= a.id %></td>
           <td><%= a.label %></td>
           <td><%= a.username %></td>
           <td>
             <% var s = a.state || 'waiting'; %>
             <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(s)) cls='err'; else if (['primed','attempting'].includes(s)) cls='warn'; else if (['token_ready','tested_ok'].includes(s)) cls='info'; %>
-            <span class="pill <%= cls %>"><%= s %></span>
-            <% if (a.state_msg) { %><div class="muted truncate" style="font-size:11px; max-width: 280px;" title="<%= a.state_msg %>"><%= a.state_msg %></div><% } %>
+            <span class="pill state-pill <%= cls %>"><%= s %></span>
+            <% if (a.state_msg) { %><div class="muted truncate state-msg" style="font-size:11px; max-width: 280px;" title="<%= a.state_msg %>"><%= a.state_msg %></div><% } %>
+            <% if (a.session_expires_at) { %><div class="muted" style="font-size:11px;">session expires: <%= a.session_expires_at %></div><% } %>
           </td>
           <td class="muted" data-hide-sm="1"><%= a.last_check_at || '—' %></td>
         </tr>
@@ -149,4 +163,165 @@
     <a href="/audit" class="muted">View full audit log →</a>
   </div>
 </div>
+
+<script>
+  // v4: live push handlers. The page renders its initial state from the
+  // server-rendered EJS above. These handlers UPDATE rows in place when
+  // events arrive — they never replace the whole view (which would wipe
+  // any form the user is filling out). Every handler is wrapped in
+  // KoorooLive's try/catch, so a thrown handler can never break the page.
+  (function setupLiveOverview() {
+    if (typeof KoorooLive === 'undefined') return;
+
+    function el(tag, attrs, children) {
+      const node = document.createElement(tag);
+      if (attrs) for (const k in attrs) {
+        if (k === 'class') node.className = attrs[k];
+        else if (k === 'text') node.textContent = attrs[k];
+        else if (k.startsWith('data-')) node.setAttribute(k, attrs[k]);
+        else node.setAttribute(k, attrs[k]);
+      }
+      if (children) for (const c of children) node.appendChild(c);
+      return node;
+    }
+    function flashRow(tr) {
+      tr.classList.add('flash-update');
+      setTimeout(function () { tr.classList.remove('flash-update'); }, 1500);
+    }
+    function safeNum(x) { const n = Number(x); return Number.isFinite(n) ? n : null; }
+    function fmtLatency(ms) { return ms ? ms + 'ms' : ''; }
+    function fmtSydney(iso) { return iso ? new Date(iso).toLocaleString() : ''; }
+
+    const STATE_CLASSES = <%- STATE_PILL_CLASS_JSON %>;
+    const USERS = <%- USER_LOOKUP_JSON %>;
+
+    // account_updated → refresh the state pill in the Accounts table.
+    KoorooLive.on('account_updated', function (a) {
+      if (!a || !a.id) return;
+      const tr = document.querySelector('tr[data-account-id="' + a.id + '"]');
+      if (!tr) return;
+      const pill = tr.querySelector('.state-pill');
+      if (pill) {
+        pill.textContent = a.state || 'waiting';
+        pill.className = 'pill state-pill ' + (STATE_CLASSES[a.state] || 'info');
+      }
+      const msg = tr.querySelector('.state-msg');
+      if (msg && a.state_msg) msg.textContent = a.state_msg;
+      flashRow(tr);
+    });
+
+    // recurring_updated → refresh the next-fire countdown + last result pill.
+    KoorooLive.on('recurring_updated', function (r) {
+      if (!r || !r.id) return;
+      // Update countdown cell(s)
+      const trs = document.querySelectorAll('tr[data-recurring-id="' + r.id + '"]');
+      for (const tr of trs) {
+        const countdown = tr.querySelector('[data-fire-at]');
+        if (countdown && r.next_fire_at) {
+          const t = new Date(r.next_fire_at).getTime();
+          if (Number.isFinite(t)) countdown.setAttribute('data-fire-at', String(t));
+        }
+        // Update last_result cell if the view has one
+        const lastResult = tr.querySelector('.last-result');
+        if (lastResult) {
+          lastResult.innerHTML = '';
+          if (r.last_error_category === 'no_courts_available') lastResult.appendChild(el('span', { class: 'pill err', text: 'no courts available' }));
+          else if (r.last_error_category === 'user_quota_exceeded') lastResult.appendChild(el('span', { class: 'pill warn', text: 'user quota exceeded' }));
+          else if (r.last_status === 'booked') lastResult.appendChild(el('span', { class: 'pill ok', text: 'booked' }));
+          else if (r.last_status === 'no_time_available') lastResult.appendChild(el('span', { class: 'pill warn', text: 'no_time_available' }));
+          else if (r.last_status === 'technical_error' || r.last_status === 'failed') lastResult.appendChild(el('span', { class: 'pill err', text: 'technical_error' }));
+          else if (r.last_status) lastResult.appendChild(el('span', { class: 'pill', text: r.last_status }));
+        }
+        flashRow(tr);
+      }
+    });
+
+    // recurring_created → prepend a row to the upcoming list. If we're
+    // not on page 1 of the pagination, just refresh the page (the new
+    // row would be on a different page anyway).
+    KoorooLive.on('recurring_created', function (r) {
+      if (!r || !r.id) return;
+      // We can't safely insert in the right pagination slot from the
+      // client. Trigger a soft refresh that re-sorts the list — but
+      // only if the new row would land on the current page. For
+      // simplicity, just bump a "new event" toast and let the user
+      // click to refresh. (Future: insert in sorted order.)
+      const tbody = document.querySelector('table.upcoming-bookings tbody');
+      if (!tbody) return;
+      // Build a row (mirrors the EJS template)
+      const tr = el('tr', { 'data-recurring-id': String(r.id) });
+      const labelCell = el('td');
+      const a = el('a', { href: '/bookings', text: r.label || '' });
+      labelCell.appendChild(a);
+      if (r.last_error_category === 'no_courts_available') {
+        const p = el('div'); p.appendChild(el('span', { class: 'pill err', text: 'no courts available' })); labelCell.appendChild(p);
+      }
+      tr.appendChild(labelCell);
+      tr.appendChild(el('td', { text: USERS[r.account_id] || ('#' + r.account_id) }));
+      tr.appendChild(el('td', { class: 'muted', 'data-hide-sm': '1', text: 'Court ' + r.court_pref + ' ' + r.time }));
+      const cdTd = el('td');
+      if (r.next_fire_at) {
+        const cdSpan = el('span', { class: 'countdown', 'data-fire-at': String(new Date(r.next_fire_at).getTime()) });
+        cdSpan.textContent = '…';
+        cdTd.appendChild(cdSpan);
+      } else { cdTd.textContent = '—'; }
+      tr.appendChild(cdTd);
+      tr.appendChild(el('td', null, [el('span', { class: 'pill ' + (r.first_occurrence_action === 'book_now' ? 'warn' : 'info'), text: r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') })]));
+      tbody.insertBefore(tr, tbody.firstChild);
+      flashRow(tr);
+    });
+
+    // fire_event_created → prepend to the "Recent booking attempts" table.
+    KoorooLive.on('fire_event_created', function (e) {
+      if (!e || !e.id) return;
+      const tbody = document.querySelector('table.fire-events tbody');
+      if (!tbody) return;
+      const tr = el('tr');
+      tr.appendChild(el('td', { class: 'muted', text: fmtSydney(e.fired_at || e.scheduled_at) }));
+      let pillClass = 'pill';
+      if (e.status === 'booked') pillClass = 'pill ok';
+      else if (e.status === 'no_time_available') pillClass = 'pill warn';
+      else if (e.status === 'technical_error') pillClass = 'pill err';
+      tr.appendChild(el('td', null, [el('span', { class: pillClass, text: e.status || '' })]));
+      tr.appendChild(el('td', { text: e.court_booked || e.court_attempted || '—' }));
+      tr.appendChild(el('td', { class: 'muted', 'data-hide-sm': '1', text: fmtLatency(e.latency_ms) }));
+      tbody.insertBefore(tr, tbody.firstChild);
+      // Cap the table at 5 rows (matches the server-side limit)
+      while (tbody.children.length > 5) tbody.removeChild(tbody.lastChild);
+      flashRow(tr);
+    });
+
+    // error_appeared → ensure the error banner shows. The header
+    // partial renders active errors server-side; if the new error
+    // isn't there, reload the page (the user is OK with a soft refresh
+    // for an actual error — it's a rare event).
+    KoorooLive.on('error_appeared', function (r) {
+      if (!r || !r.id) return;
+      const existing = document.querySelector('.error-banner[data-recurring-id="' + r.id + '"]');
+      if (existing) return; // already shown
+      // Don't auto-reload — the user might be filling a form. The
+      // header banner re-renders only on a full page load. A future
+      // improvement: render a transient toast.
+    });
+
+    // error_dismissed → remove the error banner in place.
+    KoorooLive.on('error_dismissed', function (payload) {
+      if (!payload || !payload.id) return;
+      const banner = document.querySelector('.error-banner[data-recurring-id="' + payload.id + '"]');
+      if (banner) {
+        banner.style.transition = 'opacity 200ms';
+        banner.style.opacity = '0';
+        setTimeout(function () { banner.remove(); }, 220);
+      }
+    });
+  })();
+</script>
+<style>
+  /* v4: brief highlight when a row updates via SSE. Auto-fades. */
+  .flash-update { animation: flash-update-fade 1.5s ease-out; }
+  @keyframes flash-update-fade {
+    0% { background: rgba(94, 224, 167, 0.25); }
+    100% { background: transparent; }
+  }
+</style>
 <%- include('partials/footer') %>

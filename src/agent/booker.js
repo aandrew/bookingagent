@@ -5,6 +5,8 @@ const { createBooking, cancelBooking, findBookingFor } = require('../kooroo/book
 const { slotToTime } = require('../kooroo/client');
 const repo = require('../db/repo');
 const log = require('../logger');
+const bus = require('./bus');
+const EV = require('./bus-events');
 
 async function book({ accountId, date, startTime, endTime, court, watchId = null }) {
   return withClient(accountId, async (client) => {
@@ -29,6 +31,7 @@ async function book({ accountId, date, startTime, endTime, court, watchId = null
       raw_json: r.body,
     });
     log.info('booker.manual', { accountId, status: r.status, booking: booking.id, externalId, bookingStatus: status });
+    try { bus.emit(EV.BOOKING_CREATED, booking); } catch (e) { log.warn('bus.emit.failed', { event: EV.BOOKING_CREATED, error: e.message }); }
     return { status: r.status, body: r.body, booking };
   });
 }
@@ -44,7 +47,8 @@ async function cancel(bookingId) {
   return withClient(b.account_id, async (client) => {
     const r = await cancelBooking(client, { id: b.external_id, date: b.date, from: b.start_time, to: b.end_time, court_id: b.court });
     const newStatus = r.status >= 200 && r.status < 300 ? 'cancelled' : 'cancel-failed';
-    repo.bookings.update(b.id, { status: newStatus, raw_json: r.body });
+    const updated = repo.bookings.update(b.id, { status: newStatus, raw_json: r.body });
+    try { bus.emit(EV.BOOKING_UPDATED, updated); } catch (e) { log.warn('bus.emit.failed', { event: EV.BOOKING_UPDATED, error: e.message }); }
     return { status: r.status, body: r.body };
   });
 }

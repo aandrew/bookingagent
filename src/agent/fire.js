@@ -4,6 +4,8 @@ const endpoints = require('../kooroo/endpoints.json');
 const repo = require('../db/repo');
 const state = require('./state');
 const log = require('../logger');
+const bus = require('./bus');
+const EV = require('./bus-events');
 const { findBookingFor } = require('../kooroo/booking');
 const { slotToTime, timeToSlot } = require('../kooroo/client');
 const { waitUntilExact } = require('./time');
@@ -178,6 +180,15 @@ async function recordAndPersistScheduledFire({ ctx, result, onAttempt }) {
     response_body: responseBody,
     error: cat.detail || cat.reason,
   });
+  // v4: emit fire_event_created so the booking-log page can append
+  // the row without a page refresh. Wrap in try/catch — a bus failure
+  // must never break the fire path.
+  try {
+    const recent = repo.fireEvents.list({ recurringId: rec.id, limit: 1 })[0];
+    if (recent) bus.emit(EV.FIRE_EVENT_CREATED, recent);
+  } catch (e) {
+    log.warn('bus.emit.failed', { event: EV.FIRE_EVENT_CREATED, error: e.message });
+  }
 
   let booking = null;
   if (cat.code === 'booked') {
@@ -195,6 +206,8 @@ async function recordAndPersistScheduledFire({ ctx, result, onAttempt }) {
       external_id: externalId,
       raw_json: result.body,
     });
+    // v4: emit booking_created so /bookings and the dashboard update.
+    try { bus.emit(EV.BOOKING_CREATED, booking); } catch (e) { log.warn('bus.emit.failed', { event: EV.BOOKING_CREATED, error: e.message }); }
     if (!bookedOnPrimary) {
       log.warn('fire.booked_on_fallback_court', {
         recurring: rec.id,
@@ -220,6 +233,20 @@ async function recordAndPersistScheduledFire({ ctx, result, onAttempt }) {
     // code-derived category for 'booked' (null) and unrecognized cases.
     category: cat.code === 'booked' ? null : (cat.reason || (cat.code === 'no_time_available' ? 'no_time_available' : 'technical_error')),
   });
+  // v4: emit recurring_updated so the dashboard reflects the new
+  // last_status / last_msg. Also emit error_appeared on failures so
+  // the error banner can show immediately (previously required a page
+  // refresh to see new errors).
+  try {
+    const fresh = repo.recurring.get(rec.id);
+    if (fresh) {
+      const presented = recurring.present(fresh);
+      bus.emit(EV.RECURRING_UPDATED, presented);
+      if (cat.code !== 'booked') {
+        bus.emit(EV.ERROR_APPEARED, presented);
+      }
+    }
+  } catch (e) { log.warn('bus.emit.failed', { event: EV.RECURRING_UPDATED, error: e.message }); }
   return { category: cat, externalId, result, booking };
 }
 
@@ -258,13 +285,18 @@ async function fireImmediate({ recurring: rec, client, primed, onProgress }) {
         response_body: result.raw != null ? String(result.raw).slice(0, 8000) : JSON.stringify(ac(result.body)).slice(0, 8000),
         error: null,
       });
+      try {
+        const recent = repo.fireEvents.list({ recurringId: rec.id, limit: 1 })[0];
+        if (recent) bus.emit(EV.FIRE_EVENT_CREATED, recent);
+      } catch (e) { log.warn('bus.emit.failed', { event: EV.FIRE_EVENT_CREATED, error: e.message }); }
       const status = externalId ? 'confirmed' : 'booked_unverified';
-      repo.bookings.create({
+      const newBooking = repo.bookings.create({
         account_id: rec.account_id, recurring_id: rec.id,
         court: bookedCourtApi, date: slot.date,
         start_time: slotToTime(slot.from), end_time: slotToTime(slot.to),
         status, external_id: externalId, raw_json: result.body,
       });
+      try { bus.emit(EV.BOOKING_CREATED, newBooking); } catch (e) { log.warn('bus.emit.failed', { event: EV.BOOKING_CREATED, error: e.message }); }
       repo.recurring.setLastResult(rec.id, { status: 'booked', msg: `booked court ${bookedCourtApi} on ${slot.date}`, category: null });
       state.transition(rec.account_id, state.STATES.BOOKED, `booked court ${bookedCourtApi} on ${slot.date}`);
       booked = { category: cat, externalId, attempt, courtId: bookedCourtApi };
@@ -279,6 +311,10 @@ async function fireImmediate({ recurring: rec, client, primed, onProgress }) {
       response_body: result.raw != null ? String(result.raw).slice(0, 8000) : JSON.stringify(ac(result.body)).slice(0, 8000),
       error: cat.detail || cat.reason,
     });
+    try {
+      const recent = repo.fireEvents.list({ recurringId: rec.id, limit: 1 })[0];
+      if (recent) bus.emit(EV.FIRE_EVENT_CREATED, recent);
+    } catch (e) { log.warn('bus.emit.failed', { event: EV.FIRE_EVENT_CREATED, error: e.message }); }
     if (cat.reason === 'auth_required') {
       state.transition(rec.account_id, state.STATES.SESSION_EXPIRED, cat.detail || 'auth required');
       break;
@@ -298,6 +334,16 @@ async function fireImmediate({ recurring: rec, client, primed, onProgress }) {
     const msg = '3 bookings failed to succeed';
     repo.recurring.setLastResult(rec.id, { status: 'failed', msg, category });
     state.transition(rec.account_id, state.STATES.FAILED, msg);
+    // v4: emit recurring_updated + error_appeared so the dashboard
+    // reflects the failed immediate attempt immediately.
+    try {
+      const fresh = repo.recurring.get(rec.id);
+      if (fresh) {
+        const presented = recurring.present(fresh);
+        bus.emit(EV.RECURRING_UPDATED, presented);
+        bus.emit(EV.ERROR_APPEARED, presented);
+      }
+    } catch (e) { log.warn('bus.emit.failed', { event: EV.ERROR_APPEARED, error: e.message }); }
   }
   return { booked, attempts };
 }

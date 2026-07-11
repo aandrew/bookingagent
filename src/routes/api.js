@@ -282,7 +282,8 @@ router.post('/recurring/:id/fire-now', requireAdmin, async (req, res) => {
 router.post('/recurring/:id/dismiss-error', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id, 10);
   recurring.get(id);
-  repo.recurring.dismissError(id);
+  // v4: use the wrapper so the SSE bus event is emitted.
+  recurring.dismissError(id);
   res.json({ ok: true });
 });
 
