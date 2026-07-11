@@ -18,6 +18,10 @@
        app title (left), the user label + logout (right). */
     header.top .spacer { flex:1; }
     header.top .who { color: var(--muted); font-size: 12px; }
+    /* v5: the sidebar takes 280px (or 64px when collapsed) on desktop, so
+     * the main content shifts right. The --v5-content-shift variable
+     * is set by sidebar.js. The max-width stays 1200px for the
+     * overview so the panels line up like the design. */
     main { padding: 18px; max-width: 1200px; margin: 0 auto; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
     .panel h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }

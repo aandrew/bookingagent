@@ -259,3 +259,195 @@ body.has-sidebar-open footer { padding-left: calc(var(--v5-content-shift) + 18px
 @media (max-width: 1023px) {
   body.has-sidebar-open footer { padding-left: 18px !important; }
 }
+
+/* --- v5 Overview (Phase 2) -----------------------------------------
+ * Glass cards, Volt Lime accent, monospaced data, initials chip.
+ * The existing pages (bookings, recurring, etc.) keep their old
+ * palette — the new tokens below are scoped to classes that the
+ * overview explicitly uses. */
+
+/* Layout: the overview is one wide page with three sections.
+ * The design's first row is a 2-col split (Live Operations left, Recent
+ * Attempts right). Subsequent sections are full-width. */
+.v5-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.v5-overview-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 900px) {
+  /* v5: 7/5 column split on the design row. We use 3fr/2fr instead
+   * of strict 7/5 to keep CSS math clean. */
+  .v5-overview-row { grid-template-columns: 3fr 2fr; }
+}
+
+.v5-card {
+  background: rgba(13, 28, 45, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-top-color: rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  padding: 20px 22px;
+  color: var(--v5-sidebar-text);
+}
+.v5-card:hover { border-color: rgba(255, 255, 255, 0.14); }
+
+.v5-card-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 0 0 14px;
+  color: var(--v5-sidebar-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.v5-card-title .v5-card-icon {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--v5-sidebar-accent);
+}
+.v5-card-title .v5-card-action {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--v5-sidebar-accent);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+.v5-card-title .v5-card-action:hover { text-decoration: underline; }
+
+/* --- Live Operations: next-fire cards ----------------------------- */
+.v5-op-list { display: flex; flex-direction: column; gap: 10px; }
+.v5-op-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: rgba(7, 20, 36, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 0.375rem;
+  transition: border-color 100ms, background 100ms;
+}
+.v5-op-row:hover { border-color: rgba(195, 244, 0, 0.25); }
+.v5-op-left { display: flex; align-items: center; gap: 14px; }
+.v5-op-initials {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(195, 244, 0, 0.16);
+  color: var(--v5-sidebar-accent);
+  font-weight: 700;
+  font-size: 15px;
+  border: 1px solid rgba(195, 244, 0, 0.4);
+  flex-shrink: 0;
+}
+.v5-op-title { font-size: 14px; font-weight: 600; color: var(--v5-sidebar-text); margin: 0 0 2px; }
+.v5-op-sub { font-size: 12px; color: var(--v5-sidebar-text-muted); margin: 0; }
+.v5-op-right { text-align: right; }
+.v5-op-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--v5-sidebar-text-muted);
+  margin: 0 0 4px;
+}
+.v5-op-countdown {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--v5-sidebar-accent);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* --- Recent Attempts table ---------------------------------------- */
+.v5-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.v5-table th, .v5-table td { padding: 8px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); text-align: left; }
+.v5-table th { color: var(--v5-sidebar-text-muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.v5-table tr:hover td { background: rgba(255, 255, 255, 0.04); }
+.v5-table .v5-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+/* Pills: re-style the existing .pill classes against the new palette
+ * without renaming (so we don't break the live handlers that look for
+ * .pill.ok / .pill.warn / .pill.err). */
+.pill { background: rgba(255, 255, 255, 0.06); color: var(--v5-sidebar-text); }
+.pill.ok { background: rgba(195, 244, 0, 0.18); color: var(--v5-sidebar-accent); border: 1px solid rgba(195, 244, 0, 0.45); }
+.pill.warn { background: rgba(240, 198, 116, 0.18); color: var(--warn); border: 1px solid rgba(240, 198, 116, 0.45); }
+.pill.err { background: rgba(224, 108, 117, 0.18); color: var(--err); border: 1px solid rgba(224, 108, 117, 0.45); }
+
+/* --- Accounts table ----------------------------------------------- */
+.v5-account-id { color: var(--v5-sidebar-text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.v5-account-label { font-weight: 600; color: var(--v5-sidebar-text); }
+.v5-account-username { color: var(--v5-sidebar-text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.v5-account-state-msg { color: var(--v5-sidebar-text-muted); font-size: 11px; margin-top: 2px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- Terminal-style API Activity panel -------------------------- */
+.v5-terminal {
+  background: rgba(5, 12, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 0.375rem;
+  padding: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.v5-terminal-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.6fr 3.5fr 0.6fr 0.6fr 1.2fr;
+  gap: 12px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  align-items: center;
+}
+.v5-terminal-row:last-child { border-bottom: 0; }
+.v5-terminal-row:hover { background: rgba(255, 255, 255, 0.04); }
+.v5-terminal-row .v5-time { color: var(--v5-sidebar-text-muted); }
+.v5-terminal-row .v5-method { color: var(--v5-sidebar-accent); font-weight: 700; font-size: 10px; }
+.v5-terminal-row .v5-url { color: #7ebec5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v5-terminal-row .v5-status-ok { color: #5ee0a7; }
+.v5-terminal-row .v5-status-err { color: #e06c75; }
+.v5-terminal-row .v5-latency { color: var(--v5-sidebar-text-muted); }
+.v5-terminal-row .v5-account { color: var(--v5-sidebar-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+
+.v5-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.v5-terminal-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--v5-sidebar-text-muted);
+}
+.v5-terminal-badge.ok { background: rgba(195, 244, 0, 0.16); color: var(--v5-sidebar-accent); border: 1px solid rgba(195, 244, 0, 0.45); }
+
+/* --- Mobile: collapse to single column --------------------------- */
+@media (max-width: 899px) {
+  .v5-op-row { flex-wrap: wrap; }
+  .v5-op-right { width: 100%; text-align: left; margin-top: 8px; }
+}
+@media (max-width: 700px) {
+  /* Honor the existing data-hide-sm pattern (used by the v4 handlers)
+   * for terminal-row columns and op-row subtitles. */
+  [data-hide-sm="1"] { display: none; }
+  .v5-card { padding: 14px 14px; }
+  .v5-terminal-row { grid-template-columns: 1fr 0.5fr 2fr 0.5fr; }
+  .v5-terminal-row .v5-latency,
+  .v5-terminal-row .v5-account { display: none; }
+}

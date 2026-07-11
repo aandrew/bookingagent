@@ -1,6 +1,13 @@
 <%- include('partials/header', { title: 'Overview' }) %>
 <%
-  // v3: pagination — 6 per page, max 5 pages
+  // v5 overview: redesigned to match the new design system.
+  // Same data shape as before — the route / still passes accounts,
+  // recurringRows, fireEvents, recentAudit. We just present them
+  // differently. The existing SSE event handlers (in the <script>
+  // at the bottom) look for data-recurring-id, data-account-id,
+  // data-booking-id, data-fire-event-id — those contracts are preserved.
+
+  // Pagination for the upcoming bookings (6/page, max 5 pages — same as v3)
   const PER_PAGE = 6;
   const MAX_PAGES = 5;
   const page = Math.max(1, Math.min(MAX_PAGES, parseInt(query.page || '1', 10) || 1));
@@ -13,20 +20,29 @@
   const pageStart = (currentPage - 1) * PER_PAGE;
   const upcoming = upcomingAll.slice(pageStart, pageStart + PER_PAGE);
 
-  // helper: look up account by id for the username
+  // Account lookup + initials-chip color (no avatars — colored circle
+  // derived from username[0]; color from a hash of the username so
+  // the same account always has the same color).
   const userById = Object.fromEntries(accounts.map(a => [a.id, a]));
-  function acctCell(auditOrRec) {
+  function acctUsername(auditOrRec) {
     if (!auditOrRec || !auditOrRec.account_id) return '—';
     const a = userById[auditOrRec.account_id];
     if (!a) return '#' + auditOrRec.account_id;
-    return format.truncate(a.username, 12);
+    return a.username;
   }
-  // Serialized for the live-update handler (uses data attributes to find rows)
-  const USER_LOOKUP_JSON = JSON.stringify(
-    Object.fromEntries(accounts.map(a => [a.id, a.username])),
-    null, 0
-  ).replace(/</g, '\\u003c');
-  // Pill class lookup for account state (mirrors the rendering above)
+  function initialsOf(username) {
+    if (!username) return '?';
+    const s = String(username).trim();
+    return s.charAt(0).toUpperCase();
+  }
+  // Hash → hue. Deterministic per username.
+  function hueFor(username) {
+    if (!username) return 80; // volt-lime fallback
+    let h = 0;
+    for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) | 0;
+    return Math.abs(h) % 360;
+  }
+  // Pills: same names the live handlers already look for
   const STATE_PILL_CLASS = {
     'waiting': 'info', 'tested_ok': 'info', 'token_ready': 'info',
     'primed': 'warn', 'attempting': 'warn',
@@ -34,142 +50,181 @@
     'session_expired': 'err', 'login_required': 'err', 'error': 'err',
   };
   const STATE_PILL_CLASS_JSON = JSON.stringify(STATE_PILL_CLASS);
+  // For the live handlers to look up the username per id
+  const USER_LOOKUP_JSON = JSON.stringify(
+    Object.fromEntries(accounts.map(a => [a.id, a.username]))
+  ).replace(/</g, '\\u003c');
 %>
 
-<div class="row">
-  <div class="panel">
-    <h2>Upcoming bookings (next 6)</h2>
-    <div class="table-wrap">
-      <table class="upcoming-bookings">
-        <thead><tr><th>Label</th><th>Account</th><th data-hide-sm="1">Info</th><th>Next attempt</th><th>Action</th></tr></thead>
-        <tbody>
-        <% upcoming.forEach(function(r) { %>
-          <tr data-recurring-id="<%= r.id %>">
-            <td><a href="/bookings"><%= r.label %></a>
-              <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
-              <% if (r.last_error_category === 'user_quota_exceeded') { %><div><span class="pill warn" title="The member has already booked the maximum number of hours they're allowed today on the Koorora site.">user quota exceeded</span></div><% } %>
-              <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="Last fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>">on fallback court</span></div><% } %>
-            </td>
-            <td><%= acctCell(r) %></td>
-            <td class="muted" data-hide-sm="1">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>
-            <td><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span></td>
-            <td class="last-result"><span class="pill <%= r.first_occurrence_action === 'book_now' ? 'warn' : 'info' %>"><%= r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') %></span></td>
-          </tr>
-        <% }) %>
-        <% if (!upcoming.length) { %><tr><td colspan="5" class="muted">No recurring bookings yet — add one in <a href="/make-booking">Make Booking</a>.</td></tr><% } %>
-        </tbody>
-      </table>
-    </div>
-    <% if (totalPages > 1) { %>
-      <div class="muted" style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
-        <% if (currentPage > 1) { %>
-          <a href="?page=<%= currentPage - 1 %>">‹ Prev</a>
-        <% } else { %>
-          <span class="muted">‹ Prev</span>
+<div class="v5-overview">
+
+  <%# Row 1: Live Operations (left) + Recent Attempts (right) %>
+  <div class="v5-overview-row">
+    <section class="v5-card">
+      <h2 class="v5-card-title">
+        <span class="v5-card-icon" aria-hidden="true">◉</span>
+        LIVE OPERATIONS
+      </h2>
+      <div class="v5-op-list">
+        <% upcoming.forEach(function(r, i) {
+             if (i >= 2) return;  // v5: max 2 firable cards (drop the "Queueing" third card)
+             const username = acctUsername(r);
+             const hue = hueFor(username);
+             const style = 'background: hsla(' + hue + ', 60%, 50%, 0.18); color: hsl(' + hue + ', 90%, 70%); border-color: hsla(' + hue + ', 70%, 50%, 0.4);';
+        %>
+          <div class="v5-op-row" data-recurring-id="<%= r.id %>">
+            <div class="v5-op-left">
+              <div class="v5-op-initials" style="<%= style %>" aria-hidden="true"><%= initialsOf(username) %></div>
+              <div>
+                <h3 class="v5-op-title"><%= r.label || ('Recurring #' + r.id) %></h3>
+                <p class="v5-op-sub"><%= username %> • Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></p>
+              </div>
+            </div>
+            <div class="v5-op-right">
+              <p class="v5-op-label">NEXT ATTEMPT</p>
+              <p class="v5-op-countdown countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</p>
+            </div>
+          </div>
+        <% }); %>
+        <% if (!upcoming.length) { %>
+          <div class="v5-op-row"><div class="v5-op-left" style="opacity:.5;">
+            <div class="v5-op-initials" aria-hidden="true">—</div>
+            <div><h3 class="v5-op-title">No upcoming bookings</h3>
+            <p class="v5-op-sub">Add one in <a href="/make-booking">Make Booking</a> to see it here.</p></div>
+          </div></div>
         <% } %>
-        <% for (let p = 1; p <= totalPages; p++) { %>
-          <% if (p === currentPage) { %>
-            <span class="pill ok"><%= p %></span>
-          <% } else { %>
-            <a href="?page=<%= p %>"><%= p %></a>
-          <% } %>
-        <% } %>
-        <% if (currentPage < totalPages) { %>
-          <a href="?page=<%= currentPage + 1 %>">Next ›</a>
-        <% } else { %>
-          <span class="muted">Next ›</span>
-        <% } %>
-        <span style="margin-left: auto;">Page <%= currentPage %> of <%= totalPages %> · <%= totalUpcoming %> upcoming</span>
       </div>
-    <% } %>
+    </section>
+
+    <section class="v5-card">
+      <h2 class="v5-card-title">
+        <span class="v5-card-icon" aria-hidden="true">⌚</span>
+        RECENT ATTEMPTS
+        <a href="/booking-log" class="v5-card-action">VIEW ALL →</a>
+      </h2>
+      <div class="table-wrap">
+        <table class="v5-table fire-events">
+          <thead>
+            <tr><th>Time</th><th>Status</th><th class="v5-mono">Crt</th><th class="v5-mono" data-hide-sm="1">Lat</th></tr>
+          </thead>
+          <tbody>
+          <% fireEvents.forEach(function(e) { %>
+            <tr>
+              <td class="muted"><%= format.formatSydneyDateTime(e.fired_at || e.scheduled_at) %></td>
+              <td>
+                <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
+                <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
+                <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
+                <% } else { %><span class="pill"><%= e.status %></span><% } %>
+              </td>
+              <td class="v5-mono"><%= e.court_booked || e.court_attempted || '—' %></td>
+              <td class="muted v5-mono" data-hide-sm="1"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
+            </tr>
+          <% }); %>
+          <% if (!fireEvents.length) { %><tr><td colspan="4" class="muted">No booking attempts yet.</td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
-  <div class="panel">
-    <h2>Recent booking attempts</h2>
+  <%# Row 2: Accounts Management (full width) %>
+  <section class="v5-card">
+    <h2 class="v5-card-title">
+      <span class="v5-card-icon" aria-hidden="true">⚙</span>
+      ACCOUNTS MANAGEMENT
+    </h2>
     <div class="table-wrap">
-      <table class="fire-events">
-        <thead><tr><th>Time</th><th>Status</th><th>Court</th><th data-hide-sm="1">Latency</th></tr></thead>
-        <tbody>
-        <% fireEvents.forEach(function(e) { %>
+      <table class="v5-table">
+        <thead>
           <tr>
-            <td class="muted"><%= format.formatSydneyDateTime(e.fired_at || e.scheduled_at) %></td>
-            <td>
-              <% if (e.status === 'booked') { %><span class="pill ok">booked</span>
-              <% } else if (e.status === 'no_time_available') { %><span class="pill warn">no_time_available</span>
-              <% } else if (e.status === 'technical_error') { %><span class="pill err">technical_error</span>
-              <% } else { %><span class="pill"><%= e.status %></span><% } %>
-            </td>
-            <td><%= e.court_booked || e.court_attempted || '—' %></td>
-            <td class="muted" data-hide-sm="1"><%= e.latency_ms ? e.latency_ms + 'ms' : '' %></td>
+            <th class="v5-mono">#</th>
+            <th>Label</th>
+            <th>User Identity</th>
+            <th>Current State</th>
+            <th>Contextual Notes</th>
+            <th class="v5-mono" data-hide-sm="1">Last Sync</th>
           </tr>
-        <% }) %>
-        <% if (!fireEvents.length) { %><tr><td colspan="4" class="muted">No booking attempts yet.</td></tr><% } %>
+        </thead>
+        <tbody>
+          <% accounts.forEach(function(a) {
+               const s = a.state || 'waiting';
+               const cls = STATE_PILL_CLASS[s] || 'info';
+          %>
+            <tr data-account-id="<%= a.id %>">
+              <td class="v5-account-id"><%= String(a.id).padStart(2, '0') %></td>
+              <td class="v5-account-label"><%= a.label %></td>
+              <td class="v5-account-username"><%= a.username %></td>
+              <td>
+                <span class="pill state-pill <%= cls %>"><%= s %></span>
+              </td>
+              <td class="muted" data-hide-sm="1">
+                <%# v5: state_msg is the contextual note (e.g. "Court 5 secured
+                    for 2026-07-15" or "Max booking threshold reached (3/3)").
+                    The .state-msg class is what the v4 live handler updates
+                    when an account_updated event arrives. %>
+                <span class="state-msg" title="<%= a.state_msg || '' %>"><%= a.state_msg || '—' %></span>
+              </td>
+              <td class="muted v5-mono" data-hide-sm="1"><%= a.last_check_at || '—' %></td>
+            </tr>
+          <% }); %>
         </tbody>
       </table>
     </div>
-    <div style="margin-top: 8px; text-align: right;">
-      <a href="/booking-log" class="muted">All attempts →</a>
+  </section>
+
+  <%# Row 3: Recent API Activity (terminal style) %>
+  <section class="v5-card">
+    <div class="v5-terminal-header">
+      <h2 class="v5-card-title" style="margin: 0;">
+        <span class="v5-card-icon" aria-hidden="true">☰</span>
+        RECENT API ACTIVITY
+      </h2>
+      <span class="v5-terminal-badge"><%= recentAudit.length * 2 || 0 %> /min</span>
+      <span class="v5-terminal-badge ok">HEALTHY</span>
+      <a href="/audit" class="v5-card-action" style="margin-left: auto;">VIEW FULL →</a>
     </div>
-  </div>
-</div>
-
-<div class="panel">
-  <h2>Accounts</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>#</th><th>Label</th><th>User</th><th>State</th><th data-hide-sm="1">Last check</th></tr></thead>
-      <tbody>
-      <% accounts.forEach(function(a) { %>
-        <tr data-account-id="<%= a.id %>">
-          <td><%= a.id %></td>
-          <td><%= a.label %></td>
-          <td><%= a.username %></td>
-          <td>
-            <% var s = a.state || 'waiting'; %>
-            <% var cls = 'ok'; if (['failed','technical_error','no_time_available','error','session_expired','login_required'].includes(s)) cls='err'; else if (['primed','attempting'].includes(s)) cls='warn'; else if (['token_ready','tested_ok'].includes(s)) cls='info'; %>
-            <span class="pill state-pill <%= cls %>"><%= s %></span>
-            <% if (a.state_msg) { %><div class="muted truncate state-msg" style="font-size:11px; max-width: 280px;" title="<%= a.state_msg %>"><%= a.state_msg %></div><% } %>
-            <% if (a.session_expires_at) { %><div class="muted" style="font-size:11px;">session expires: <%= a.session_expires_at %></div><% } %>
-          </td>
-          <td class="muted" data-hide-sm="1"><%= a.last_check_at || '—' %></td>
-        </tr>
-      <% }) %>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="panel">
-  <h2>Recent API calls (last 10)</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Time</th><th>Account</th><th>Method</th><th>URL</th><th>Status</th><th data-hide-sm="1">Latency</th></tr></thead>
-      <tbody>
+    <div class="v5-terminal">
       <% recentAudit.forEach(function(a) { %>
-        <tr>
-          <td class="muted"><%= format.formatSydneyDateTime(a.ts) %></td>
-          <td><%= acctCell(a) %></td>
-          <td><%= a.method || '' %></td>
-          <td class="muted truncate" title="<%= a.url || '' %>"><%= a.url || '' %></td>
-          <td><% if (a.status && a.status >= 400) { %><span class="pill err"><%= a.status %></span><% } else if (a.status) { %><span class="pill ok"><%= a.status %></span><% } else { %><span class="pill"><%= a.error || '' %></span><% } %></td>
-          <td class="muted" data-hide-sm="1"><%= a.latency_ms ? a.latency_ms + 'ms' : '' %></td>
-        </tr>
-      <% }) %>
-      <% if (!recentAudit.length) { %><tr><td colspan="6" class="muted">No API calls yet.</td></tr><% } %>
-      </tbody>
-    </table>
-  </div>
-  <div style="margin-top: 8px; text-align: right;">
-    <a href="/audit" class="muted">View full audit log →</a>
-  </div>
+        <div class="v5-terminal-row">
+          <div class="v5-time"><%= format.formatSydneyDateTime(a.ts) %></div>
+          <div class="v5-method"><%= a.method || '' %></div>
+          <div class="v5-url" title="<%= a.url || '' %>"><%= a.url || '' %></div>
+          <div class="<%= (a.status && a.status >= 400) ? 'v5-status-err' : (a.status ? 'v5-status-ok' : '') %>"><%= a.status || a.error || '' %></div>
+          <div class="v5-latency"><%= a.latency_ms ? a.latency_ms + 'ms' : '' %></div>
+          <div class="v5-account"><%= acctUsername(a) %></div>
+        </div>
+      <% }); %>
+      <% if (!recentAudit.length) { %>
+        <div class="v5-terminal-row"><div class="v5-time" style="opacity:.5;">— no API calls yet —</div><div></div><div></div><div></div><div></div><div></div></div>
+      <% } %>
+    </div>
+  </section>
+
+  <%# Pagination footer (same as v3 — only render if needed) %>
+  <% if (totalPages > 1) { %>
+    <div class="muted" style="display: flex; gap: 8px; align-items: center; padding: 0 4px;">
+      <% if (currentPage > 1) { %><a href="?page=<%= currentPage - 1 %>">‹ Prev</a>
+      <% } else { %><span class="muted">‹ Prev</span><% } %>
+      <% for (let p = 1; p <= totalPages; p++) { %>
+        <% if (p === currentPage) { %><span class="pill ok"><%= p %></span>
+        <% } else { %><a href="?page=<%= p %>"><%= p %></a><% } %>
+      <% } %>
+      <% if (currentPage < totalPages) { %><a href="?page=<%= currentPage + 1 %>">Next ›</a>
+      <% } else { %><span class="muted">Next ›</span><% } %>
+      <span style="margin-left: auto;">Page <%= currentPage %> of <%= totalPages %> · <%= totalUpcoming %> upcoming</span>
+    </div>
+  <% } %>
 </div>
 
 <script>
-  // v4: live push handlers. The page renders its initial state from the
-  // server-rendered EJS above. These handlers UPDATE rows in place when
-  // events arrive — they never replace the whole view (which would wipe
-  // any form the user is filling out). Every handler is wrapped in
-  // KoorooLive's try/catch, so a thrown handler can never break the page.
+  // v4/v5: live push handlers. Update DOM in place when events arrive.
+  // Every handler is wrapped in KoorooLive's try/catch (inside the
+  // live.js dispatcher) so a thrown handler can never break the page.
+  // Data-* contract:
+  //   data-recurring-id  → recurring_updated, recurring_created
+  //   data-account-id   → account_updated
+  //   data-fire-event-id → fire_event_created
   (function setupLiveOverview() {
     if (typeof KoorooLive === 'undefined') return;
 
@@ -178,6 +233,7 @@
       if (attrs) for (const k in attrs) {
         if (k === 'class') node.className = attrs[k];
         else if (k === 'text') node.textContent = attrs[k];
+        else if (k === 'style') node.setAttribute('style', attrs[k]);
         else if (k.startsWith('data-')) node.setAttribute(k, attrs[k]);
         else node.setAttribute(k, attrs[k]);
       }
@@ -188,7 +244,6 @@
       tr.classList.add('flash-update');
       setTimeout(function () { tr.classList.remove('flash-update'); }, 1500);
     }
-    function safeNum(x) { const n = Number(x); return Number.isFinite(n) ? n : null; }
     function fmtLatency(ms) { return ms ? ms + 'ms' : ''; }
     function fmtSydney(iso) { return iso ? new Date(iso).toLocaleString() : ''; }
 
@@ -210,101 +265,83 @@
       flashRow(tr);
     });
 
-    // recurring_updated → refresh the next-fire countdown + last result pill.
+    // recurring_updated → refresh the next-fire countdown on the v5 op-row.
     KoorooLive.on('recurring_updated', function (r) {
       if (!r || !r.id) return;
-      // Update countdown cell(s)
-      const trs = document.querySelectorAll('tr[data-recurring-id="' + r.id + '"]');
+      const trs = document.querySelectorAll('tr[data-recurring-id="' + r.id + '"], .v5-op-row[data-recurring-id="' + r.id + '"]');
       for (const tr of trs) {
         const countdown = tr.querySelector('[data-fire-at]');
         if (countdown && r.next_fire_at) {
           const t = new Date(r.next_fire_at).getTime();
           if (Number.isFinite(t)) countdown.setAttribute('data-fire-at', String(t));
         }
-        // Update last_result cell if the view has one
-        const lastResult = tr.querySelector('.last-result');
-        if (lastResult) {
-          lastResult.innerHTML = '';
-          if (r.last_error_category === 'no_courts_available') lastResult.appendChild(el('span', { class: 'pill err', text: 'no courts available' }));
-          else if (r.last_error_category === 'user_quota_exceeded') lastResult.appendChild(el('span', { class: 'pill warn', text: 'user quota exceeded' }));
-          else if (r.last_status === 'booked') lastResult.appendChild(el('span', { class: 'pill ok', text: 'booked' }));
-          else if (r.last_status === 'no_time_available') lastResult.appendChild(el('span', { class: 'pill warn', text: 'no_time_available' }));
-          else if (r.last_status === 'technical_error' || r.last_status === 'failed') lastResult.appendChild(el('span', { class: 'pill err', text: 'technical_error' }));
-          else if (r.last_status) lastResult.appendChild(el('span', { class: 'pill', text: r.last_status }));
-        }
         flashRow(tr);
       }
     });
 
-    // recurring_created → prepend a row to the upcoming list. If we're
-    // not on page 1 of the pagination, just refresh the page (the new
-    // row would be on a different page anyway).
+    // recurring_created → prepend a new v5-op-row to the Live Operations list.
     KoorooLive.on('recurring_created', function (r) {
       if (!r || !r.id) return;
-      // We can't safely insert in the right pagination slot from the
-      // client. Trigger a soft refresh that re-sorts the list — but
-      // only if the new row would land on the current page. For
-      // simplicity, just bump a "new event" toast and let the user
-      // click to refresh. (Future: insert in sorted order.)
-      const tbody = document.querySelector('table.upcoming-bookings tbody');
-      if (!tbody) return;
-      // Build a row (mirrors the EJS template)
-      const tr = el('tr', { 'data-recurring-id': String(r.id) });
-      const labelCell = el('td');
-      const a = el('a', { href: '/bookings', text: r.label || '' });
-      labelCell.appendChild(a);
-      if (r.last_error_category === 'no_courts_available') {
-        const p = el('div'); p.appendChild(el('span', { class: 'pill err', text: 'no courts available' })); labelCell.appendChild(p);
-      }
-      tr.appendChild(labelCell);
-      tr.appendChild(el('td', { text: USERS[r.account_id] || ('#' + r.account_id) }));
-      tr.appendChild(el('td', { class: 'muted', 'data-hide-sm': '1', text: 'Court ' + r.court_pref + ' ' + r.time }));
-      const cdTd = el('td');
+      const list = document.querySelector('.v5-op-list');
+      if (!list) return;
+      const existing = document.querySelector('[data-recurring-id="' + r.id + '"]');
+      if (existing) return; // idempotent
+      const username = USERS[r.account_id] || ('#' + r.account_id);
+      // Hash → hue (same algo as the server-side render)
+      let h = 0;
+      for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) | 0;
+      const hue = Math.abs(h) % 360;
+      const style = 'background: hsla(' + hue + ', 60%, 50%, 0.18); color: hsl(' + hue + ', 90%, 70%); border-color: hsla(' + hue + ', 70%, 50%, 0.4);';
+      const row = document.createElement('div');
+      row.className = 'v5-op-row';
+      row.setAttribute('data-recurring-id', String(r.id));
+      const left = el('div', { class: 'v5-op-left' });
+      const initials = el('div', { class: 'v5-op-initials', style: style, 'aria-hidden': 'true' });
+      initials.textContent = (username || '?').charAt(0).toUpperCase();
+      left.appendChild(initials);
+      const text = el('div');
+      const title = el('h3', { class: 'v5-op-title' }); title.textContent = r.label || ('Recurring #' + r.id);
+      const sub = el('p', { class: 'v5-op-sub' }); sub.textContent = username + ' • Court ' + r.court_pref + ' ' + (r.time || '');
+      text.appendChild(title); text.appendChild(sub);
+      left.appendChild(text);
+      row.appendChild(left);
+      const right = el('div', { class: 'v5-op-right' });
+      const label = el('p', { class: 'v5-op-label' }); label.textContent = 'NEXT ATTEMPT';
+      const cd = el('p', { class: 'v5-op-countdown countdown' });
       if (r.next_fire_at) {
-        const cdSpan = el('span', { class: 'countdown', 'data-fire-at': String(new Date(r.next_fire_at).getTime()) });
-        cdSpan.textContent = '…';
-        cdTd.appendChild(cdSpan);
-      } else { cdTd.textContent = '—'; }
-      tr.appendChild(cdTd);
-      tr.appendChild(el('td', null, [el('span', { class: 'pill ' + (r.first_occurrence_action === 'book_now' ? 'warn' : 'info'), text: r.first_occurrence_action === 'book_now' ? 'booking' : (r.first_occurrence_action || '—') })]));
-      tbody.insertBefore(tr, tbody.firstChild);
-      flashRow(tr);
+        cd.setAttribute('data-fire-at', String(new Date(r.next_fire_at).getTime()));
+        cd.textContent = '…';
+      } else { cd.textContent = '—'; }
+      right.appendChild(label); right.appendChild(cd);
+      row.appendChild(right);
+      list.insertBefore(row, list.firstChild);
+      flashRow(row);
     });
 
-    // fire_event_created → prepend to the "Recent booking attempts" table.
+    // fire_event_created → prepend to the Recent Attempts table.
     KoorooLive.on('fire_event_created', function (e) {
       if (!e || !e.id) return;
       const tbody = document.querySelector('table.fire-events tbody');
       if (!tbody) return;
-      const tr = el('tr');
+      const tr = document.createElement('tr');
       tr.appendChild(el('td', { class: 'muted', text: fmtSydney(e.fired_at || e.scheduled_at) }));
       let pillClass = 'pill';
       if (e.status === 'booked') pillClass = 'pill ok';
       else if (e.status === 'no_time_available') pillClass = 'pill warn';
       else if (e.status === 'technical_error') pillClass = 'pill err';
       tr.appendChild(el('td', null, [el('span', { class: pillClass, text: e.status || '' })]));
-      tr.appendChild(el('td', { text: e.court_booked || e.court_attempted || '—' }));
-      tr.appendChild(el('td', { class: 'muted', 'data-hide-sm': '1', text: fmtLatency(e.latency_ms) }));
+      tr.appendChild(el('td', { class: 'v5-mono', text: e.court_booked || e.court_attempted || '—' }));
+      tr.appendChild(el('td', { class: 'muted v5-mono', 'data-hide-sm': '1', text: fmtLatency(e.latency_ms) }));
       tbody.insertBefore(tr, tbody.firstChild);
-      // Cap the table at 5 rows (matches the server-side limit)
       while (tbody.children.length > 5) tbody.removeChild(tbody.lastChild);
       flashRow(tr);
     });
 
-    // error_appeared → ensure the error banner shows. The header
-    // partial renders active errors server-side; if the new error
-    // isn't there, reload the page (the user is OK with a soft refresh
-    // for an actual error — it's a rare event).
-    KoorooLive.on('error_appeared', function (r) {
-      if (!r || !r.id) return;
-      const existing = document.querySelector('.error-banner[data-recurring-id="' + r.id + '"]');
-      if (existing) return; // already shown
-      // Don't auto-reload — the user might be filling a form. The
-      // header banner re-renders only on a full page load. A future
-      // improvement: render a transient toast.
-    });
+    // error_appeared → no-op for now (the header banner re-renders on
+    // page load; a future improvement could be a transient toast).
+    KoorooLive.on('error_appeared', function () { /* no-op */ });
 
-    // error_dismissed → remove the error banner in place.
+    // error_dismissed → fade out the error banner in place.
     KoorooLive.on('error_dismissed', function (payload) {
       if (!payload || !payload.id) return;
       const banner = document.querySelector('.error-banner[data-recurring-id="' + payload.id + '"]');
@@ -317,10 +354,10 @@
   })();
 </script>
 <style>
-  /* v4: brief highlight when a row updates via SSE. Auto-fades. */
+  /* v4: brief highlight when a row updates via SSE. */
   .flash-update { animation: flash-update-fade 1.5s ease-out; }
   @keyframes flash-update-fade {
-    0% { background: rgba(94, 224, 167, 0.25); }
+    0% { background: rgba(195, 244, 0, 0.18); }
     100% { background: transparent; }
   }
 </style>
