@@ -1394,6 +1394,35 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
     assert.equal(ic, '◉', 'every sidebar parent icon must be ◉ (was ▤ or ⚙, which broke in the system font)');
   }
 
+  // 3b. v5.1.2: the sidebar parents must be <a> tags (not <button>).
+  // <button> user-agent styles (background, border, font, color,
+  // text-align, line-height) subtly differ from <a> styles even after
+  // the appearance: none reset, so the parents rendered with a
+  // different visual rhythm than the Overview direct link. The top nav
+  // is already <a>, so standardize everything on <a> for consistency.
+  // The opening tag spans EJS template expressions (<%= ... %>) which
+  // contain > characters, so a single regex can't cleanly match the
+  // whole tag. We grab a window around the data-sidebar-parent attr
+  // and check that the tag starts with <a (looking BACK from the
+  // attr, past the EJS expressions).
+  function grabTagWindow(src, attr) {
+    const idx = src.indexOf(attr);
+    if (idx < 0) return null;
+    const start = Math.max(0, idx - 400);
+    return src.slice(start, idx + attr.length + 200);
+  }
+  const bookingsWindow = grabTagWindow(sidebarSrc, 'data-sidebar-parent="bookings"');
+  const settingsWindow = grabTagWindow(sidebarSrc, 'data-sidebar-parent="settings"');
+  assert.ok(bookingsWindow, 'sidebar must have a Bookings parent');
+  assert.ok(settingsWindow, 'sidebar must have a Settings parent');
+  // The 400 chars BEFORE data-sidebar-parent must contain `<a ` (or
+  // `<a\n` / `<a\t`) just before the EJS that precedes the attr.
+  // If the tag is <button>, the assertion fails.
+  assert.match(bookingsWindow, /<a[\s\n][\s\S]*?data-sidebar-parent="bookings"/, 'Bookings parent must be an <a> tag (was <button>)');
+  assert.match(settingsWindow, /<a[\s\n][\s\S]*?data-sidebar-parent="settings"/, 'Settings parent must be an <a> tag (was <button>)');
+  assert.match(bookingsWindow, /href="\/bookings"/, 'Bookings parent must link to /bookings (the default-landing child)');
+  assert.match(settingsWindow, /href="\/settings"/, 'Settings parent must link to /settings (the default-landing child)');
+
   // 4. Dashboard CSS has the new v5.1 pieces
   assert.match(dashboardSrc, /\.v5-topnav\s*\{/, 'dashboard.css must define .v5-topnav');
   assert.match(dashboardSrc, /\.v5-topnav-item\s*\{/, 'dashboard.css must define .v5-topnav-item');
