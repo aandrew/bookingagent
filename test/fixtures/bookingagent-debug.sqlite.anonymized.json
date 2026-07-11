@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-07-10T23:20:04.982Z",
+  "source": "backups/bookingagent-20260710T231454Z-for-debug_.sqlite",
+  "source_sha256": "bdb18fca4baf8b75c9cb30b881f6988d19e99d251b1114edc073da89e0aefab3",
+  "target": "test/fixtures/bookingagent-debug.sqlite",
+  "target_sha256": "12e38f675387e3343314317ec4ff6393976161f45278b9f2388d08db814cadee",
+  "target_bytes": 331776,
+  "redactions": {
+    "accounts": {
+      "count": 2,
+      "fields": [
+        "label",
+        "username",
+        "password"
+      ]
+    },
+    "sessions": {
+      "fields": [
+        "cookies_json",
+        "bearer_token",
+        "csrf_token"
+      ]
+    },
+    "watches": {
+      "count": 3,
+      "fields": [
+        "label"
+      ]
+    },
+    "recurring_bookings": {
+      "count": 4,
+      "fields": [
+        "label"
+      ]
+    },
+    "audit_log": {
+      "response_body_rows_scrubbed": 178,
+      "request_body_emails_redacted": 0,
+      "rules": [
+        "HTML -> \"[HTML redacted, N bytes]\"",
+        "JSON fields redacted: name, contact_id, user_id, email, bookingName, bookingContactPhone, bookingEmail, membershipOrCardNumber, firstName, lastName, fullName, phone, mobile, phoneNumber",
+        "phone pattern -> <phone>, email pattern -> <email>"
+      ]
+    },
+    "fire_events": {
+      "response_body_rows_scrubbed": 0,
+      "rules": [
+        "same as audit_log.response_body"
+      ]
+    }
+  },
+  "kept": {
+    "bookings_court_date_time_status_external_id": true,
+    "bookings_raw_json": "generic API messages (e.g. \"Your booking has been made.\"), no PII",
+    "watches_court_date_time": true,
+    "recurring_bookings_courts_time": true,
+    "audit_log_url_method_status_latency_ts_request_body": true,
+    "audit_log_request_body": "form-encoded action params + numeric IDs; emails scrubbed"
+  }
+}
