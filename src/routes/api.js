@@ -168,13 +168,6 @@ router.delete('/watches/:id', requireAdmin, (req, res) => {
   repo.watches.remove(parseInt(req.params.id, 10));
   res.json({ ok: true });
 });
-router.patch('/watches/:id', requireAdmin, (req, res) => {
-  res.json(repo.watches.update(parseInt(req.params.id, 10), req.body || {}));
-});
-router.delete('/watches/:id', requireAdmin, (req, res) => {
-  repo.watches.remove(parseInt(req.params.id, 10));
-  res.json({ ok: true });
-});
 
 router.post('/watches/:id/book-now', requireAdmin, async (req, res) => {
   try {
