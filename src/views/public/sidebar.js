@@ -89,7 +89,7 @@
       if (!parent || !children) return;
       // Single-accordion UX: collapse others when opening one.
       if (open) {
-        document.querySelectorAll('.v5-sidebar-parent[aria-expanded="true"]').forEach(function (p) {
+        document.querySelectorAll('.v5-sidebar-item[aria-expanded="true"]').forEach(function (p) {
           if (p !== parent) {
             p.setAttribute('aria-expanded', 'false');
             var c = document.querySelector('[data-sidebar-children="' + p.getAttribute('data-sidebar-parent') + '"]');
@@ -158,11 +158,11 @@
       ham.addEventListener('click', function () { api.toggle(); });
     }
 
-    // Accordion parents
-    document.querySelectorAll('.v5-sidebar-parent').forEach(function (parent) {
+    // Accordion parents — items that have the data-sidebar-parent
+    // attribute (Bookings, Settings). The whole row is the click
+    // target, including the arrow indicator on the right.
+    document.querySelectorAll('.v5-sidebar-item[data-sidebar-parent]').forEach(function (parent) {
       parent.addEventListener('click', function (ev) {
-        // Ignore clicks on the arrow if the parent itself is a button
-        // — the arrow is a visual indicator, the whole button toggles.
         ev.preventDefault();
         var name = parent.getAttribute('data-sidebar-parent');
         var isOpen = parent.getAttribute('aria-expanded') === 'true';

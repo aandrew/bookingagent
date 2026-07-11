@@ -1106,7 +1106,6 @@ test('v5: sidebar.js exposes KoorooSidebar API + open/close/toggle/accordion', (
   const queryMap = {
     '.v5-hamburger': hamburger,
     '#v5-sidebar-backdrop': backdrop,
-    '.v5-sidebar-parent': null,
     '.v5-sidebar-children': null,
   };
   body.querySelector = function (sel) { return queryMap[sel] || null; };
@@ -1284,7 +1283,7 @@ test('v5: sidebar accordion: single open at a time (opening one closes others)',
       return null;
     },
     querySelectorAll(sel) {
-      if (sel === '.v5-sidebar-parent[aria-expanded="true"]') {
+      if (sel === '.v5-sidebar-item[aria-expanded="true"]') {
         return allElements.filter(e => e.attrs['data-sidebar-parent'] && e.attrs['aria-expanded'] === 'true');
       }
       return [];
@@ -1427,32 +1426,31 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
   // The icon must be a 20×20 box (matches the arrow), and the row
   // must have min-height: 40px (10 padding + 20 content + 10 padding)
   // so all rows line up regardless of the parent's extra arrow.
-  assert.match(dashboardSrc, /\.v5-sidebar-(item|child|parent)[^{]*\{[^}]*min-height:\s*40px/s, 'sidebar rows must have min-height: 40px for visual alignment');
+  assert.match(dashboardSrc, /\.v5-sidebar-(item|child)[^{]*\{[^}]*min-height:\s*40px/s, 'sidebar rows must have min-height: 40px for visual alignment');
   assert.match(dashboardSrc, /\.v5-sidebar-icon\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/s, 'sidebar icon must be a 20×20 box (matches the arrow)');
-  // Verify the same min-height rule applies to item, child, AND parent
-  // (not just one of them). The single shared selector is the
-  // "rationalised one style" the user asked for.
+  // Verify the same min-height rule applies to both item and child.
+  // The single shared selector is the "rationalised one style" the user
+  // asked for — v5.1.5 removed the v5-sidebar-parent class entirely.
   const minHeightMatches = (dashboardSrc.match(/min-height:\s*40px/g) || []).length;
   assert.ok(minHeightMatches >= 1, 'min-height: 40px should be declared at least once');
-  // The arrow must also be 20×20 to match the icon (otherwise the
-  // parent's flex container would be a different height from the item's).
-  assert.match(dashboardSrc, /\.v5-sidebar-parent\s+\.v5-sidebar-arrow\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/s, 'sidebar arrow must be a 20×20 box (matches the icon)');
+  // The arrow must also be 20×20 to match the icon. Scoped to items
+  // that have the data-sidebar-parent attribute (i.e. the accordion
+  // parents).
+  assert.match(dashboardSrc, /\.v5-sidebar-item\[data-sidebar-parent\]\s+\.v5-sidebar-arrow\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/s, 'sidebar arrow must be a 20×20 box (matches the icon)');
 
-  // v5.1.4: the parent must have a defensive !important override for
-  // padding + min-height. We observed the parent rendered with no
-  // padding in some states (stale cache, future refactor that splits
-  // the shared selector). The !important guarantees the parent is
-  // visually aligned with the items and children.
-  assert.match(dashboardSrc, /\.v5-sidebar-parent\s*\{[^}]*padding:\s*10px\s+20px\s+!important/s, 'parent padding must be !important to guarantee alignment');
-  assert.match(dashboardSrc, /\.v5-sidebar-parent\s*\{[^}]*min-height:\s*40px\s+!important/s, 'parent min-height must be !important to guarantee alignment');
+  // v5.1.5: the v5-sidebar-parent class is gone. The shared rule
+  // already covers all rows (item + child) with the right padding and
+  // min-height. The arrow-only rules use the [data-sidebar-parent]
+  // attribute selector to scope them to the accordion parents.
+  assert.doesNotMatch(dashboardSrc, /^\.v5-sidebar-parent\s*\{/m, 'v5-sidebar-parent class must be gone — use .v5-sidebar-item + data-sidebar-parent instead');
 
   // 4. Dashboard CSS has the new v5.1 pieces
   assert.match(dashboardSrc, /\.v5-topnav\s*\{/, 'dashboard.css must define .v5-topnav');
   assert.match(dashboardSrc, /\.v5-topnav-item\s*\{/, 'dashboard.css must define .v5-topnav-item');
   assert.match(dashboardSrc, /--v5-topnav-height:/, 'dashboard.css must define the --v5-topnav-height token');
-  assert.match(dashboardSrc, /\.v5-sidebar-parent\s*\{[^}]*padding:\s*10px\s+20px/s, 'sidebar parent must share the item padding (10px 20px)');
+  assert.match(dashboardSrc, /\.v5-sidebar-(item|child)\s*\{[^}]*padding:\s*10px\s+20px/s, 'sidebar item + child must share the padding (10px 20px)');
   assert.match(dashboardSrc, /\.v5-sidebar-item:hover[^}]*text-decoration:\s*none/s, 'sidebar item hover must not underline (v5.1)');
-  assert.match(dashboardSrc, /\.v5-sidebar-parent:hover[^}]*\.v5-sidebar-arrow/, 'parent arrow should react to hover (v5.1)');
+  assert.match(dashboardSrc, /\.v5-sidebar-item\[data-sidebar-parent\]:hover[^}]*\.v5-sidebar-arrow/, 'parent arrow should react to hover (v5.1)');
   assert.match(dashboardSrc, /@media\s*\(\s*max-width:\s*1023px\s*\)[^}]*\.v5-topnav\s*\{\s*display:\s*none/s, 'top nav must hide on mobile (v5.1)');
 
   // 5. Header has the v5.1 color tokens (Volt Lime accent, glass bg)
