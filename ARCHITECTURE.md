@@ -1,12 +1,12 @@
 # Architecture — Kooroora Booking Agent
 
-> **Version:** 3.6 · **Last updated:** 2026-07-11
+> **Version:** 4.0 · **Last updated:** 2026-07-11
 > **Stack:** Node.js 20, Express, better-sqlite3 (WAL), undici, Playwright, node-cron, EJS, Caddy 2 + caddy-dns/cloudflare, Docker
 > **Live deployment:** https://bookings.boomercheugys.com
 
 This document describes how the system is wired together so a future session (or another engineer) can pick it up. It complements the user-facing `README.md` (how to use the dashboard), the operator-facing `DEPLOY.md` (how to run the server), and the dedicated design doc for the time-based booking logic at [`docs/recurring-bookings.md`](docs/recurring-bookings.md). The goal here is to explain **how it works under the hood** and **why each piece is the way it is**.
 
-## v3 → v3.6 changelog (the big picture)
+## v3 → v4 changelog (the big picture)
 
 - **v3.1 — Court auto-allocation**: when the user picks "any court" the system picks the first non-conflicting court automatically. See `src/agent/courtAllocator.js`.
 - **v3.2 — Unified Make Booking form**: removed Strategy, Lead days, Time end fields. Added AM/PM widget, single date picker, auto-generated label. Tooltips + field validation.
@@ -21,6 +21,7 @@ This document describes how the system is wired together so a future session (or
 - **v3.6 — Audit log no longer stores 147KB HTML pages**: `client.request` only stores request/response bodies for non-GET requests. The `members-court-booking/` HTML page GETs are no longer captured by default. Set `AUDIT_FULL_BODIES=1` for the old behaviour. Shrinks `audit_log` by ~95% in production.
 - **v3.6 — In-flight set**: `scheduler.inFlight` prevents duplicate fires if `rescanAll` races with an in-progress fire. The fire callback returns early if the same recurringId is already firing.
 - **v3.6 — booked_on_fallback warning**: when a booking lands on a non-preferred court (the preferred court was taken at fire time), the dashboard shows a "last booking on fallback court" pill on the recurring list, recurring detail, and overview. Logs `fire.booked_on_fallback_court` with the preferred and actual courts.
+- **v4 — Live push updates (SSE)**: the dashboard now receives real-time updates from the server over Server-Sent Events. New state changes (account state, fire events, bookings, recurring updates, errors) propagate to every open browser tab without page refresh. See §21 for the bus + SSE + frontend client design.
 
 ---
 
@@ -790,6 +791,154 @@ Documented here so a future session doesn't accidentally re-implement them.
 
 ---
 
+## 21. Live push updates (v4)
+
+The dashboard receives real-time updates from the server over **Server-Sent Events** (SSE). When the agent fires a booking, transitions an account, or a recurring changes its last-status, every open browser tab updates without a page refresh.
+
+### Why SSE and not WebSocket
+
+- One-way (server→client) is exactly what we need — the page renders its initial state from server-rendered EJS, and events update rows in place.
+- EventSource is built into every browser, with auto-reconnect on disconnect.
+- HTTP/1.1, works through Caddy/nginx, no extra dependency.
+- The browser cannot set custom headers on EventSource — auth is via the admin session cookie, which is sent automatically.
+
+### Components
+
+```
+  ┌──────────────────┐ emit              ┌──────────────┐ write      ┌──────────┐
+  │ state.transition │ ────────────────▶ │  bus.js      │ ────────▶ │ SSE resp │
+  │ fire.recordAnd.. │                   │ (singleton   │  frame:   │ (one per │
+  │ booker.book      │                   │  EventEmitter│  event:.. │ browser  │
+  │ monitor.runWatch │                   │  + custom    │  data:..  │  tab)    │
+  │ recurring.add    │                   │  subscribe)  │           │          │
+  └──────────────────┘                   └──────────────┘           └──────────┘
+                                                                              │
+                                                                              │ HTTP/SSE
+                                                                              ▼
+                                                                       live.js (browser)
+                                                                       KoorooLive.on(...)
+                                                                       DOM updates
+```
+
+### The bus (`src/agent/bus.js`)
+
+A thin in-process EventEmitter with a custom `subscribe()` API. Subscribers are *live* handles — they expose `write(name, data)`, `dead`, `buffer`, `droppedEvents` — so we can:
+
+- Clean up dead subscribers (write throws) on the next emit.
+- Drop the oldest event for slow subscribers (buffer full) instead of blocking the bus.
+- Never let a misbehaving subscriber crash the agent (`emit()` never throws).
+
+```js
+// Subscribe
+const unsubscribe = bus.subscribe({
+  dead: false, buffer: [], droppedEvents: 0,
+  write(name, data) { /* send SSE frame */ },
+  close() { /* end the response */ },
+});
+
+// Emit
+bus.emit(EV.ACCOUNT_UPDATED, { id: 1, state: 'primed', ... });
+```
+
+Event name constants live in `src/agent/bus-events.js` (single source of truth for both the server emit sites and the browser handler names).
+
+### The SSE endpoint (`src/routes/sse.js`)
+
+`GET /api/events` is gated by `requireAdmin` (cookie auth). It:
+
+- Sets the standard SSE headers (`text/event-stream`, `no-cache`, `keep-alive`, `X-Accel-Buffering: no` for nginx).
+- Disables Nagle (`socket.setNoDelay(true)`) so heartbeats flush immediately.
+- Flushes headers immediately so the browser's EventSource fires `open` on the first byte.
+- Subscribes to the bus. Each event is written as `event: <name>\ndata: <json>\n\n`.
+- Sends a heartbeat (SSE comment line `: heartbeat <ts>`) every `scheduler.heartbeatIntervalMs()` ms.
+- Cleans up on `req.close` / `res.close` / `res.error` / `req.error`.
+
+#### Smart heartbeat cadence
+
+Heartbeats scale with context:
+
+- **2s** when a fire is imminent (within 0-20s) OR a fire is currently in flight (`scheduler.isFiringAny()`).
+- **30s** as the default when no fire is within 5 minutes.
+- **Linear ramp** in between: 2s at T-0, 6s at T-60s, 12s at T-120s, 30s at T-300s and beyond.
+
+The interval is re-evaluated on every heartbeat, so the cadence adapts as the next fire approaches and recedes. This lets us detect a dead connection within 2s of a fire but stay quiet during the long stretches between fires. The user explicitly asked for this "dial up near a fire, wind back down" behaviour.
+
+### The browser client (`src/views/public/live.js`)
+
+Loaded as a `<script src="/public/live.js">` from `partials/footer.ejs`. Exposes a global `KoorooLive` with:
+
+```js
+KoorooLive.on('booking_created', (b) => { /* update DOM */ });
+KoorooLive.snapshot();   // { connected, reconnectAttempt, lastEventTime, stale }
+KoorooLive.disconnect(); // stop reconnecting (for tests)
+```
+
+Defensive guarantees (per the user's "very defensively" requirement):
+
+- **Every handler is wrapped in a try/catch.** A thrown handler can never break the page or the connection.
+- **Malformed event JSON is logged and ignored.** The page doesn't crash on a botched push.
+- **Auto-reconnect with exponential backoff** (2s → 30s cap) on disconnect. EventSource's built-in reconnect is overridden so we control the cadence.
+- **The page renders its initial state from server-rendered EJS** — it works with no JS at all. Events UPDATE rows in place; they never replace the whole view, never wipe a form the user is filling out, never lose state.
+- **The Live indicator** in the footer (green dot 'live' / yellow 'reconnecting' / grey 'offline') is purely cosmetic — the page works without it.
+
+### Per-view handlers
+
+Each page has a small block at the bottom that registers handlers and uses data-* attributes to find rows. For example, on `/bookings`:
+
+```js
+KoorooLive.on('booking_created', (b) => {
+  if (!b || !b.id) return;
+  const existing = document.querySelector('tr[data-booking-id="' + b.id + '"]');
+  if (existing) return;  // idempotent
+  const tbody = document.querySelector('table.bookings tbody');
+  // ... build <tr> with createElement + textContent, prepend
+  flashRow(tr);  // brief CSS highlight on the new row
+});
+```
+
+A brief CSS flash (`@keyframes flash-update-fade`) highlights the row that changed, then auto-fades. The user sees the change happened without a jarring page reload.
+
+### Where events are emitted
+
+| Source | Events | Wrap |
+|---|---|---|
+| `state.transition` | `account_updated` (skipped on no-op transitions) | `try { bus.emit(...) } catch { log.warn(...) }` |
+| `fire.recordAndPersistScheduledFire` | `fire_event_created`, `booking_created`, `recurring_updated`, `error_appeared` (on failure) | same |
+| `fire.fireImmediate` | same (with the 3-retry path) | same |
+| `booker.book` | `booking_created` | same |
+| `booker.cancel` | `booking_updated` | same |
+| `recurring.add` | `recurring_created` (+ `error_appeared` if no_courts_available) | same |
+| `recurring.update` | `recurring_updated` | same |
+| `recurring.dismissError` | `error_dismissed` | same |
+| `monitor.runWatch` | `booking_created` | same |
+
+The wrap pattern is always `try { bus.emit(EV.X, payload) } catch (e) { log.warn('bus.emit.failed', { event: EV.X, error: e.message }) }`. A bus failure (which shouldn't happen) can never break the calling path — only log a warning.
+
+### Tests (10 new in v4, 83/83 total)
+
+- `bus.subscribe receives emitted events` — basic round-trip
+- `bus dead subscriber is cleaned up on next emit` — dead-subscriber hygiene
+- `bus.emit never throws to caller (defensive)` — the main contract
+- `state.transition emits account_updated (skipped when state unchanged)` — throttle by no-op
+- `recurring.add emits recurring_created; recurring.update emits recurring_updated`
+- `heartbeatIntervalMs ramps from 2s near a fire to 30s baseline` — the smart heartbeat
+- `SSE endpoint requires auth (302 redirect to /login)` — auth gate
+- `SSE endpoint streams events to a connected client` — real HTTP stream
+- `live.js exposes KoorooLive API + defensive handler wrapping` — sandboxed VM with FakeEventSource
+
+The live.js test uses `node:vm` to load the script with a minimal `EventSource` mock, exercises the full API surface, and verifies that thrown handlers and malformed JSON don't propagate.
+
+### What to do if it breaks
+
+- **"Live" indicator is yellow/red for too long** → the bus.emit is failing. Check the server logs for `bus.emit.failed` warnings. Most likely cause: a subscriber's `write()` throws because the client disconnected; the bus should have cleaned it up.
+- **The page is up to date but the server's state is wrong** → the page is rendering from cache. The user should refresh.
+- **A push event seems to "miss" rows** → the handler looks up a row by data-* attribute; if the row doesn't exist (e.g. user navigated away), the handler is a no-op. The page still works.
+- **High CPU on the server** → check `bus.stats()` (subscribers, droppedEvents). A high dropped count means a client is too slow; the buffer cap is protecting the bus.
+
+---
+
+---
+
 ## 19. Where to start when picking this up
 
 1. **Read `README.md`** for the user-facing view.
@@ -800,6 +949,7 @@ Documented here so a future session doesn't accidentally re-implement them.
 6. **Read `src/agent/scheduler.js`** — the in-process timer pool, ~190 lines. Owns `slotForFire` and `nextBookingTarget`.
 7. **Read `src/agent/fire.js`** — the actual POST + categorise, ~240 lines.
 8. **Read `src/agent/monitor.js`** — the watches path (`runWatch`, `fireDueWatches`), ~150 lines.
+9. **Read `src/agent/bus.js` + `src/agent/bus-events.js` + `src/routes/sse.js` + `src/views/public/live.js`** (v4) — the live push pipeline (in-process event bus, SSE endpoint, browser client).
 9. **Read `src/agent/courtAllocator.js`** — the court auto-allocation, ~50 lines.
 10. **Read `src/kooroo/client.js`** — the undici + tough-cookie client, ~170 lines.
 11. **Read `src/db/repo.js`** — the data layer, ~300 lines.

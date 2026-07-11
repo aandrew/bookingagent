@@ -15,6 +15,11 @@ Multi-account tennis-court booking agent for [kooroora.asn.au](https://kooroora.
 
 Kooroora releases booking slots **exactly 7 days before the slot's start time, to the hour**. The agent holds an active session, primes a pre-built POST request minutes before the release, then fires at the exact millisecond to win the race against other bots. It chains successful fires to the following week automatically.
 
+**v4 highlights** — Live push updates
+- **Server-Sent Events** stream every state change to every open browser tab: account state transitions, fire events, booking creation, recurring updates, error appeared/dismissed.
+- **Smart heartbeat** scales between 2s (when a fire is imminent or in flight) and 30s (default). Detects dead connections within 2s of a fire but stays quiet between fires.
+- **Defensive by design**: every push handler is wrapped in try/catch, malformed JSON is logged + ignored, the page renders its initial state from EJS so it works with no JS, events UPDATE rows in place (no whole-view replace, no form wipe). The "Live" indicator in the footer is purely cosmetic.
+
 **v3.6 highlights**
 - **Faster fire path** — all pre-POST work (session probe, body build, cookie hydration) now happens at T-leadMs via `warmup.prepareForFire`. The fire callback at T is just `setTimeout(POST)`, not 2-3 seconds of setup. A regression test enforces the < 50ms budget.
 - **`booked_unverified` + 30s reconciliation** — when the server confirms a booking but the immediate day-schedule lookup misses it (cache / eventual consistency), the row is recorded as `booked_unverified` and a cron fills in `external_id` within 30s. The dashboard shows a "reconciling…" pill until then; Cancel is disabled because we have no id to send to the server.

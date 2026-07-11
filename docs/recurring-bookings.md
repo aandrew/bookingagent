@@ -1,8 +1,8 @@
 # Recurring Booking Logic — Design
 
-> **Version:** 3.6 · **Last updated:** 2026-07-11
-> **Owns:** weekly schedule model, fire-time computation, court auto-allocation, chain, fire-path timing, booked_unverified reconciliation
-> **Files:** `src/agent/recurring.js`, `src/agent/scheduler.js`, `src/agent/courtAllocator.js`, `src/agent/fire.js`, `src/agent/monitor.js` (one-shot watches), `src/agent/jobs.js` (crons), `src/views/make_booking.ejs`, `src/views/recurring_detail.ejs`, `src/db/schema.sql`
+> **Version:** 4.0 · **Last updated:** 2026-07-11
+> **Owns:** weekly schedule model, fire-time computation, court auto-allocation, chain, fire-path timing, booked_unverified reconciliation, live push updates
+> **Files:** `src/agent/recurring.js`, `src/agent/scheduler.js`, `src/agent/courtAllocator.js`, `src/agent/fire.js`, `src/agent/monitor.js` (one-shot watches), `src/agent/jobs.js` (crons), `src/agent/bus.js` + `src/agent/bus-events.js` + `src/routes/sse.js` (live push), `src/views/public/live.js` (browser client), `src/views/make_booking.ejs`, `src/views/recurring_detail.ejs`, `src/db/schema.sql`
 
 This document describes the time-based booking logic end-to-end so the next session can pick it up. It's deliberately scenario-driven because the edge cases are where this code lives or dies.
 
@@ -271,8 +271,78 @@ A regression test (`v3.6: executeScheduledBooking — regression guard, prepareF
 6. **Court auto-alloc conflict**: `GET /api/recurring` with the same day_of_week + time — see if all 3 courts are taken.
 7. **Session expired**: `GET /api/accounts/:id/state` — if `login_required`, click "Re-login" on the Accounts page (this runs Playwright in the container).
 8. **Cancel refuses with 409**: the booking has `external_id = null` (status = `booked_unverified` or `failed`). Wait for reconciliation, or check the audit log to see why `external_id` was never filled.
+9. **Live indicator is yellow/red in the footer**: the SSE connection is dropping or reconnecting. Check the server logs for `sse.disconnect` (with `reason: write-failed` or `client-closed`). If `bus.emit.failed` warnings appear, a subscriber's `write()` is throwing — the bus should clean it up, but a stuck dead subscriber will block new emits. Restart the server.
+10. **Push updates seem to miss rows**: the handler looks up rows by data-* attribute. If the row doesn't exist on the current page (e.g. user navigated to a different view), the handler is a no-op — the page still works. Refreshing the page syncs the initial state.
 
-## 13. What to do when adding new behavior
+## 13. v4 live push updates
+
+The dashboard receives real-time updates from the server over **Server-Sent Events** (SSE). When the agent fires a booking, transitions an account, or a recurring changes its last-status, every open browser tab updates without a page refresh. SSE was chosen over WebSocket because we only need server→client (the page renders its initial state from EJS and updates rows in place).
+
+### The pipeline
+
+```
+state.transition / fire / booker / monitor / recurring
+    │
+    │ bus.emit(EVENT_NAME, payload)
+    ▼
+src/agent/bus.js  ───────── in-process EventEmitter
+    │                      (subscribers are { write, dead, buffer,
+    │                       droppedEvents } handles, never throw)
+    ▼
+src/routes/sse.js  ──────── GET /api/events (requireAdmin gated)
+    │                       writes `event: <name>\ndata: <json>\n\n`
+    │                       frames; smart heartbeat per
+    │                       scheduler.heartbeatIntervalMs()
+    ▼
+HTTP/SSE over Caddy
+    │
+    ▼
+src/views/public/live.js  ─ EventSource client, auto-reconnect
+    │                        with exponential backoff; per-page
+    │                        handlers do `tr.querySelector(...).textContent = ...`
+    ▼
+DOM updates in place
+```
+
+### The events
+
+Event name constants live in `src/agent/bus-events.js`. The emit sites are all wrapped in `try { bus.emit(...) } catch (e) { log.warn('bus.emit.failed', ...) }` so a bus failure can never break the calling path.
+
+| Event | Source | When |
+|---|---|---|
+| `account_updated` | `state.transition` | State actually changed (no-op transitions suppressed) |
+| `fire_event_created` | `fire.recordAndPersistScheduledFire` / `monitor.runWatch` | Every fire event row inserted |
+| `booking_created` | `fire.recordAndPersistScheduledFire` / `booker.book` / `monitor.runWatch` | A booking was created (confirmed or booked_unverified) |
+| `booking_updated` | `booker.cancel` | A booking's status changed (e.g. cancelled) |
+| `recurring_created` | `recurring.add` | A new recurring was added |
+| `recurring_updated` | `recurring.update` / `fire.recordAndPersistScheduledFire` | A recurring's `next_fire_at` or `last_status` changed |
+| `error_appeared` | `fire.recordAndPersistScheduledFire` / `recurring.add` | A new error pill should show |
+| `error_dismissed` | `recurring.dismissError` | The user dismissed an error |
+
+### Smart heartbeat
+
+`scheduler.heartbeatIntervalMs()` returns:
+
+- **2s** when a fire is imminent OR a fire is currently in flight (`scheduler.isFiringAny()`)
+- **30s** as the default when no fire within 5 minutes
+- **Linear ramp in between** (2s at T-0, 6s at T-60s, 30s at T-300s and beyond)
+
+Re-evaluated on every heartbeat so the cadence adapts as the next fire approaches and recedes. Lets us detect a dead connection within 2s of a fire but stay quiet during the long stretches between fires.
+
+### Defensive design
+
+The user explicitly required the push updates be **very defensive** — hold state on failed calls, show intermittent failure modes without wiping the UI. We take that seriously:
+
+- `bus.emit` never throws to the caller. A misbehaving subscriber can never crash the bus.
+- Slow subscribers get their oldest event dropped (with a `droppedEvents` counter) so they can't slow down the bus.
+- Every browser handler is wrapped in `try/catch` inside `KoorooLive`. A thrown handler can never break the page or the connection.
+- Malformed event JSON is logged + ignored. The page doesn't crash on a botched push.
+- The page renders its initial state from server-rendered EJS — it works with no JS at all. Events UPDATE rows in place using `textContent` + `createElement`; they never replace the whole view, never wipe a form the user is filling out, never lose state.
+- The "Live" indicator in the footer (green dot 'live' / yellow 'reconnecting' / grey 'offline') is purely cosmetic — the page works without it.
+- Auto-reconnect with exponential backoff (2s → 30s cap) on disconnect. EventSource's built-in reconnect is overridden so we control the cadence.
+- The browser can opt out of live updates by setting `data-live-updates="off"` on `<body>` (e.g. for the print view).
+
+## 14. What to do when adding new behavior
 
 - **New scheduled recurring trigger?** Add a cron in `jobs.js`. Use the existing `recurring.schedule(id)` to arm timers.
 - **New booking action type?** Add it to `fire.categorise()`. Make sure the chain handles the new status (don't break on unknown).
