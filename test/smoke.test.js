@@ -1423,6 +1423,21 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
   assert.match(bookingsWindow, /href="\/bookings"/, 'Bookings parent must link to /bookings (the default-landing child)');
   assert.match(settingsWindow, /href="\/settings"/, 'Settings parent must link to /settings (the default-landing child)');
 
+  // 3c. v5.1.3: the sidebar item and parent must be visually identical.
+  // The icon must be a 20×20 box (matches the arrow), and the row
+  // must have min-height: 40px (10 padding + 20 content + 10 padding)
+  // so all rows line up regardless of the parent's extra arrow.
+  assert.match(dashboardSrc, /\.v5-sidebar-(item|child|parent)[^{]*\{[^}]*min-height:\s*40px/s, 'sidebar rows must have min-height: 40px for visual alignment');
+  assert.match(dashboardSrc, /\.v5-sidebar-icon\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/s, 'sidebar icon must be a 20×20 box (matches the arrow)');
+  // Verify the same min-height rule applies to item, child, AND parent
+  // (not just one of them). The single shared selector is the
+  // "rationalised one style" the user asked for.
+  const minHeightMatches = (dashboardSrc.match(/min-height:\s*40px/g) || []).length;
+  assert.ok(minHeightMatches >= 1, 'min-height: 40px should be declared at least once');
+  // The arrow must also be 20×20 to match the icon (otherwise the
+  // parent's flex container would be a different height from the item's).
+  assert.match(dashboardSrc, /\.v5-sidebar-parent\s+\.v5-sidebar-arrow\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/s, 'sidebar arrow must be a 20×20 box (matches the icon)');
+
   // 4. Dashboard CSS has the new v5.1 pieces
   assert.match(dashboardSrc, /\.v5-topnav\s*\{/, 'dashboard.css must define .v5-topnav');
   assert.match(dashboardSrc, /\.v5-topnav-item\s*\{/, 'dashboard.css must define .v5-topnav-item');

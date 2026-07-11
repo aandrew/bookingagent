@@ -126,16 +126,16 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
   color: var(--v5-sidebar-text-muted);
 }
 
-/* Sidebar items (top-level + accordion children). v5.1: the parent
- * (Bookings / Settings) and the item (Overview / direct links) now
- * share the same padding, gap, and color rules — the parent just
- * adds an arrow on the right. We also reset <button> user-agent
- * defaults (background, border, color, margin, font, appearance)
- * so the parent <button> elements render identically to the <a> items. */
+/* Sidebar rows: ONE shared style for every top-level item, child, and
+ * accordion parent. v5.1.3: min-height: 40px ensures the row is the
+ * same height whether or not the parent has an arrow. v5.1.2: the
+ * parent is an <a> (not a <button>), so user-agent button resets are
+ * no longer required. */
 .v5-sidebar-item, .v5-sidebar-child, .v5-sidebar-parent {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 40px;
   padding: 10px 20px;
   color: var(--v5-sidebar-text-muted);
   text-decoration: none;
@@ -163,10 +163,18 @@ body.has-sidebar-open .v5-sidebar { transform: translateX(0); }
   background: var(--v5-sidebar-active);
   color: var(--v5-sidebar-accent);
 }
+/* Icon: 20×20 box, centered. Same in items, children, and parents —
+ * so the row's content height is determined by the icon, not by
+ * line-height/font quirks. The arrow is also 20×20 (below), so
+ * items and parents have identical heights (min-height 40px above
+ * ensures that even with no arrow / no icon, the row stays aligned). */
 .v5-sidebar-item .v5-sidebar-icon, .v5-sidebar-child .v5-sidebar-icon, .v5-sidebar-parent .v5-sidebar-icon {
   font-size: 18px;
-  width: 22px;
-  text-align: center;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   line-height: 1;
 }
