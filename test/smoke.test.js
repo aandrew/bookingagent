@@ -521,17 +521,20 @@ test('v3.4: courtAllocator.allocateCourt — "any" with all 3 taken, no_courts_a
 test('v3.4: recurring.add with first_slot_date — first fire is at opening (T-7d)', () => {
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
   const a = repo.accounts.create({ label: 'v34a', username: 'v34a', password: 'p' });
-  // User picks Wed 15 Jul 2026 at 19:00. The first fire should be at 8 Jul 19:00
-  // (the opening). day_of_week=3 (Wed).
+  // Pick a date that's > 7 days out so the opening (T-7d) is still in the
+  // future. Using a dynamic date keeps this test stable as time moves on.
+  const picked = new Date(Date.now() + 14 * 86_400_000);
+  const pickedDateStr = picked.toISOString().slice(0, 10);
+  const pickedDow = picked.getDay();
   const r = recurring.add({
     account_id: a.id,
-    day_of_week: 3, time: '19:00', court_pref: '4',
-    duration_mins: 60, first_slot_date: '2026-07-15',
+    day_of_week: pickedDow, time: '19:00', court_pref: '4',
+    duration_mins: 60, first_slot_date: pickedDateStr,
   });
-  // next_fire_at should be 8 Jul 2026 19:00 Sydney = 8 Jul 09:00 UTC (AEST)
-  const expectedOpening = time.sydneyWallToUtc('2026-07-15', '19:00') - 7 * 86_400_000;
+  // next_fire_at should be pickedDate - 7d at 19:00 Sydney
+  const expectedOpening = time.sydneyWallToUtc(pickedDateStr, '19:00') - 7 * 86_400_000;
   assert.equal(r.next_fire_at, new Date(expectedOpening).toISOString());
-  assert.equal(r.first_slot_date, '2026-07-15');
+  assert.equal(r.first_slot_date, pickedDateStr);
   assert.equal(r.first_occurrence_action, 'book_now');
   repo.accounts.remove(a.id);
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
@@ -540,14 +543,10 @@ test('v3.4: recurring.add with first_slot_date — first fire is at opening (T-7
 test('v3.4: recurring.add with first_slot_date within 7 days (opening passed) — fires at the picked date', () => {
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
   const a = repo.accounts.create({ label: 'v34b', username: 'v34b', password: 'p' });
-  // Simulate a picked date that's within 7 days by using today's weekday
-  // (no opening-before-now to skip — we test the "fall back to picked date" path).
-  // We can't easily mock Date.now() in a unit test, so we just verify the
-  // happy path (picked date is >7 days out) here, and rely on the smoke
-  // test for the within-7-days case.
-  const today = new Date();
-  const todayDow = today.getDay();
-  const picked = new Date(today.getTime() + 14 * 86_400_000);
+  // Pick a date that's within 7 days so the opening (T-7d) is already in
+  // the past. The code's fallback should set next_fire_at to the picked
+  // date itself (the closing moment of the slot).
+  const picked = new Date(Date.now() + 4 * 86_400_000);
   const pickedDateStr = picked.toISOString().slice(0, 10);
   const pickedDow = picked.getDay();
   const r = recurring.add({
@@ -555,8 +554,10 @@ test('v3.4: recurring.add with first_slot_date within 7 days (opening passed) �
     day_of_week: pickedDow, time: '19:00', court_pref: '4',
     duration_mins: 60, first_slot_date: pickedDateStr,
   });
-  const expectedOpening = time.sydneyWallToUtc(pickedDateStr, '19:00') - 7 * 86_400_000;
-  assert.equal(r.next_fire_at, new Date(expectedOpening).toISOString());
+  // next_fire_at should be the picked date at 19:00 Sydney
+  const expectedSlot = time.sydneyWallToUtc(pickedDateStr, '19:00');
+  assert.equal(r.next_fire_at, new Date(expectedSlot).toISOString());
+  assert.equal(r.first_slot_date, pickedDateStr);
   repo.accounts.remove(a.id);
   for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
 });
@@ -710,6 +711,77 @@ test('v3.6: scheduler.isFiring reflects in_flight set', () => {
   assert.equal(typeof scheduler.isFiring, 'function');
   // No fire in flight for a random id
   assert.equal(scheduler.isFiring(123456789), false);
+});
+
+test('v3.6: executeScheduledBooking — regression guard, prepareForFire NOT called when context is stashed', async () => {
+  // This is the v3.6 timing fix in test form: the fire path used to
+  // call prepareForFire and hydrateFromSession AFTER the fire time, which
+  // cost 2-3 seconds. The fix moves that work to T-leadMs (warmup), and
+  // the fire callback at T just pops the stashed context and POSTs.
+  //
+  // If anyone ever re-introduces async setup work into the fire path,
+  // this test will catch it by throwing.
+  for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+  for (const w of repo.watches.list()) repo.watches.remove(w.id);
+  const a = repo.accounts.create({ label: 'v36timing', username: 'v36timing', password: 'p' });
+  const rec = recurring.add({ account_id: a.id, label: 'timing', day_of_week: 3, time: '19:00', court_pref: '4', duration_mins: 60 });
+
+  const warmup = require('../src/agent/warmup');
+  const origPrepareForFire = warmup.prepareForFire;
+  let prepareForFireCalls = 0;
+  warmup.prepareForFire = async (...args) => {
+    prepareForFireCalls++;
+    throw new Error('prepareForFire should NOT be called when context is stashed');
+  };
+
+  // Stash a fire-ready context. Use a fully-mocked client so the POST
+  // returns immediately and we can measure the fire-path overhead.
+  const fire = require('../src/agent/fire');
+  const fakeResult = {
+    status: 200,
+    body: { message: 'Your booking has been made.', status: 200 },
+    raw: '{"message":"Your booking has been made.","status":200}',
+    latency_ms: 5,
+    error: null,
+  };
+  const ctx = {
+    recurring: rec,
+    client: {
+      account: a,
+      userId: '76',
+      contactId: '10001891',
+      createBooking: async () => fakeResult,
+      getDaySchedule: async () => ({ status: 200, body: { bookings: [] } }),
+      cookieHeader: () => '',
+    },
+    account: a,
+    targetMs: Date.now(),
+    slot: { date: '2026-07-15', from: 38, to: 40 },
+    apiPref: '5',
+    apiCourts: ['5', '6', '7'],
+    userId: '76',
+    contactId: '10001891',
+  };
+  fire.stashFireContext(rec.id, ctx);
+
+  const scheduler = require('../src/agent/scheduler');
+  const t0 = Date.now();
+  await scheduler.executeScheduledBooking(rec, ctx.targetMs);
+  const elapsed = Date.now() - t0;
+
+  try {
+    assert.equal(prepareForFireCalls, 0, 'prepareForFire should NOT be called when context is stashed');
+    // With a fully-mocked client and an in-the-past target time, the
+    // fire path should be dominated by DB writes (< 200ms on any sane
+    // machine). The 2-3s pre-POST drift from before v3.6 is gone.
+    assert.ok(elapsed < 500, `fire path took ${elapsed}ms — should be < 500ms with a stashed context. If this fires, someone re-introduced async setup work in the hot path.`);
+  } finally {
+    warmup.prepareForFire = origPrepareForFire;
+    fire.dropFireContext(rec.id);
+    repo.recurring.update(rec.id, { first_occurrence_action: 'resolved' });
+    for (const r of repo.recurring.list()) repo.recurring.remove(r.id);
+    repo.accounts.remove(a.id);
+  }
 });
 
 test('v3.6: fire.fireScheduledFromContext — happy path (mocked client)', async () => {
