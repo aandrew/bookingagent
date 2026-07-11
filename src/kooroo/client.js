@@ -139,8 +139,16 @@ class KoorooClient {
       throw e;
     }
     const latency = Date.now() - t0;
-    const reqPreview = config.audit.fullBodies && body ? String(body).slice(0, 200_000) : null;
-    const resPreview = config.audit.fullBodies && text ? text.slice(0, 200_000) : null;
+    // v3.6: only capture request/response bodies for non-GET requests
+    // (the POST admin-ajax calls — where the body is small and useful
+    // for debugging). GETs are usually the 147KB members-court-booking
+    // HTML page, which the audit view doesn't even display. Storing
+    // those wastes ~23 MB of DB space (190 rows × 147KB = 28MB before
+    // the 200KB slice). fullBodies: false skips both; set AUDIT_FULL_BODIES=1
+    // to re-enable the old behaviour (captures everything up to 200KB).
+    const captureBody = (method !== 'GET') || config.audit.fullBodies;
+    const reqPreview = captureBody && body ? String(body).slice(0, 200_000) : null;
+    const resPreview = captureBody && text ? text.slice(0, 200_000) : null;
     repo.audit.add({ account_id: this.account.id, direction: 'out', method, url, status: res.status, latency_ms: latency, request_body: reqPreview, response_body: resPreview });
     return { res, text, status: res.status, headers: res.headers };
   }

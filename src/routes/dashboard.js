@@ -15,12 +15,33 @@ function withLocals(extra) {
   return Object.assign({ activeErrors: repo.recurring.listUnacknowledgedErrors() }, extra || {});
 }
 
+// v3.6: for each recurring, attach a `booked_on_fallback` flag and the
+// `last_booked_court` it landed on. The view uses this to show a warning
+// pill ("on fallback court") when the most recent successful fire didn't
+// land on the user's preferred court. N+1 but the list is small (handful
+// of recurrings) and fireEvents.list is indexed by recurring_id.
+function annotateFallback(recurringRows) {
+  for (const r of recurringRows) {
+    const recent = repo.fireEvents.list({ recurringId: r.id, limit: 10 });
+    const lastBooked = recent.find(e => e.status === 'booked' && e.court_booked);
+    if (lastBooked) {
+      const prefApi = recurring.COURT_TO_API[r.court_pref] || null;
+      r.last_booked_court = lastBooked.court_booked;
+      r.booked_on_fallback = prefApi && String(lastBooked.court_booked) !== String(prefApi);
+    } else {
+      r.last_booked_court = null;
+      r.booked_on_fallback = false;
+    }
+  }
+}
+
 router.get('/', requireAdmin, (req, res) => {
   const accounts = repo.accounts.list();
   const watches = repo.watches.list();
   const bookings = repo.bookings.list({ limit: 10 });
   const recentAudit = repo.audit.list({ limit: 20 });
   const recurringRows = recurring.list();
+  annotateFallback(recurringRows);
   const fireEvents = repo.fireEvents.list({ limit: 5 });
   res.render('overview', withLocals({ accounts, watches, bookings, recentAudit, recurringRows, fireEvents, config, format, query: req.query }));
 });
@@ -57,9 +78,9 @@ router.get('/bookings', requireAdmin, (req, res) => {
 router.get('/recurring', requireAdmin, (req, res) => {
   const recurringRows = recurring.list();
   const accounts = repo.accounts.list();
-  // Build a username lookup for the view
   const userById = Object.fromEntries(accounts.map(a => [a.id, a.username]));
   for (const r of recurringRows) r.account_username = userById[r.account_id] || null;
+  annotateFallback(recurringRows);
   // v3: handle ?added=N&label=X flash
   if (req.query.added && req.query.label) {
     req.session.flash = { type: 'ok', message: `Added ${req.query.label} (recurring #${req.query.added})` };
@@ -73,10 +94,6 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
   const events = repo.fireEvents.list({ recurringId: r.id, limit: 50 });
   const bookings = repo.bookings.listForRecurring(r.id, 20);
   const account = repo.accounts.get(r.account_id);
-  // v3.5: compute the booking target — the slot the next fire will book.
-  // E.g. if the next attempt is Wed 8 Jul, the target is Wed 15 Jul.
-  // We pre-format the date/time/dow strings here so the view doesn't need
-  // to require kooroo/client (EJS in production doesn't expose require).
   const scheduler = require('../agent/scheduler');
   const slotToTime = require('../kooroo/client').slotToTime;
   const targetSlot = scheduler.nextBookingTarget(r);
@@ -93,7 +110,19 @@ router.get('/recurring/:id', requireAdmin, (req, res) => {
       prettyTime: format.formatTime12h(targetTime),
     };
   }
-  res.render('recurring_detail', withLocals({ recurring: r, events, bookings, account, format, query: req.query, target }));
+  // v3.6: detect "booked on fallback court" — the most recent successful
+  // fire landed on a court that isn't the user's preferred one. This means
+  // the preferred court was taken (by another account, an external human,
+  // or a parallel fire) and the bot fell through to the next court in
+  // the fallback order. Surface it in the UI so the user notices.
+  const preferredApiCourt = recurring.COURT_TO_API[r.court_pref] || null;
+  const lastBooked = events.find(e => e.status === 'booked' && e.court_booked);
+  const bookedOnFallback = lastBooked && preferredApiCourt && String(lastBooked.court_booked) !== String(preferredApiCourt);
+  const bookedOnCourt = lastBooked ? lastBooked.court_booked : null;
+  res.render('recurring_detail', withLocals({
+    recurring: r, events, bookings, account, format, query: req.query, target,
+    fallback: bookedOnFallback ? { preferred: preferredApiCourt, actual: bookedOnCourt } : null,
+  }));
 });
 
 router.get('/booking-log', requireAdmin, (req, res) => {

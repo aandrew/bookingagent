@@ -58,6 +58,7 @@
           <% if (r.first_occurrence_action === 'book_now') { %><span class="pill warn">book now</span>
           <% } else if (r.first_occurrence_action === 'resolved') { %><span class="pill ok">resolved</span>
           <% } else { %><span class="pill info">scheduled</span><% } %>
+          <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="The most recent successful fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>. Check the recurring detail for more.">on fallback court</span></div><% } %>
         </td>
         <td>
           <% if (r.next_fire_at) { %><span class="countdown" data-fire-at="<%= new Date(r.next_fire_at).getTime() %>">…</span>

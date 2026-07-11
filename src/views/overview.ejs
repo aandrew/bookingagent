@@ -33,6 +33,7 @@
         <tr>
           <td><a href="/bookings"><%= r.label %></a>
             <% if (r.last_error_category === 'no_courts_available') { %><div><span class="pill err">no courts available</span></div><% } %>
+            <% if (r.booked_on_fallback) { %><div><span class="pill warn" title="Last fire landed on court <%= r.last_booked_court %> instead of your preferred C<%= r.court_pref %>">on fallback court</span></div><% } %>
           </td>
           <td><%= acctCell(r) %></td>
           <td class="muted">Court <%= r.court_pref %> <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][r.day_of_week] %> <%= r.time %></td>

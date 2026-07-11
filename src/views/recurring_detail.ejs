@@ -5,6 +5,12 @@
   </h2>
   <p class="muted">Account: <%= account ? account.label + ' (' + account.username + ')' : '#' + recurring.account_id %> — State: <%= account?.state || '—' %></p>
   <p>Pattern: Court <%= recurring.court_pref %> on <%= ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][recurring.day_of_week] %> at <%= recurring.time %> Sydney, <%= recurring.duration_mins %>m duration</p>
+  <% if (fallback) { %>
+    <p>
+      <span class="pill warn" title="The most recent successful fire landed on court <%= fallback.actual %> (API id) instead of your preferred court <%= fallback.preferred %>. This means the preferred court was taken at fire time and the bot fell through to the next court. If this keeps happening, you may want to switch to a less popular time slot, or check whether another account is racing you for the same slot.">last booking on fallback court</span>
+      <span class="muted">Court <%= fallback.actual %> instead of preferred C<%= recurring.court_pref %></span>
+    </p>
+  <% } %>
   <p>Next attempt: <span class="countdown" data-fire-at="<%= new Date(recurring.next_fire_at).getTime() %>">…</span> (<%= recurring.next_fire_at %> Sydney = <%= format.formatSydneyDateTime(recurring.next_fire_at) %>)</p>
   <% if (target) { %>
     <p>
