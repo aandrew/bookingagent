@@ -1327,6 +1327,35 @@ test('v5: sidebar accordion: single open at a time (opening one closes others)',
   assert.equal(children.settings.attrs['aria-expanded'], 'false');
 });
 
+// v5 Phase 3: verify the new dashboard.css file ships the v5 design
+// tokens and the new overview component classes. This is a small
+// "shape" test — it catches accidental deletions of the new tokens
+// during a future refactor.
+test('v5: dashboard.css ships the v5 design tokens + new overview classes', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'src', 'views', 'public', 'dashboard.css'), 'utf8');
+  // v5 design tokens
+  assert.match(css, /--v5-sidebar-width:\s*280px/, 'must define v5 sidebar width token');
+  assert.match(css, /--v5-sidebar-collapsed:\s*64px/, 'must define v5 sidebar collapsed width');
+  assert.match(css, /--v5-sidebar-accent:\s*#c3f400/, 'must define Volt Lime accent token');
+  // v5 sidebar layout classes
+  assert.match(css, /\.v5-sidebar\s*\{/, 'must define .v5-sidebar');
+  assert.match(css, /\.v5-sidebar-backdrop/, 'must define .v5-sidebar-backdrop for mobile');
+  assert.match(css, /\.v5-hamburger/, 'must define .v5-hamburger for the top-nav toggle');
+  // v5 overview component classes
+  assert.match(css, /\.v5-card\s*\{/, 'must define .v5-card');
+  assert.match(css, /\.v5-op-row\s*\{/, 'must define .v5-op-row for next-fire cards');
+  assert.match(css, /\.v5-op-initials/, 'must define .v5-op-initials for the avatar-replacement');
+  assert.match(css, /\.v5-op-countdown/, 'must define .v5-op-countdown for the Volt Lime countdown');
+  assert.match(css, /\.v5-terminal\s*\{/, 'must define .v5-terminal for the API activity log');
+  assert.match(css, /\.v5-card-title\s*\{/, 'must define .v5-card-title');
+  // Reduced motion
+  assert.match(css, /prefers-reduced-motion/, 'must respect prefers-reduced-motion');
+  // Mobile breakpoint for stacking
+  assert.match(css, /@media\s*\(\s*max-width:\s*1023px\s*\)/, 'must define the mobile breakpoint (max-width 1023px)');
+});
+
 test('v3.6: fire.categorize — user_quota_exceeded is distinct from already_booked', () => {
   // v3.6: when the Koorora server returns
   //   "Booking this time will push you over the maximum number of hours
