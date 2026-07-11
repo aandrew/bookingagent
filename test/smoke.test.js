@@ -1438,6 +1438,14 @@ test('v5.1: section titles changed, top nav exists, arrow is visible, all-pages 
   // parent's flex container would be a different height from the item's).
   assert.match(dashboardSrc, /\.v5-sidebar-parent\s+\.v5-sidebar-arrow\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/s, 'sidebar arrow must be a 20×20 box (matches the icon)');
 
+  // v5.1.4: the parent must have a defensive !important override for
+  // padding + min-height. We observed the parent rendered with no
+  // padding in some states (stale cache, future refactor that splits
+  // the shared selector). The !important guarantees the parent is
+  // visually aligned with the items and children.
+  assert.match(dashboardSrc, /\.v5-sidebar-parent\s*\{[^}]*padding:\s*10px\s+20px\s+!important/s, 'parent padding must be !important to guarantee alignment');
+  assert.match(dashboardSrc, /\.v5-sidebar-parent\s*\{[^}]*min-height:\s*40px\s+!important/s, 'parent min-height must be !important to guarantee alignment');
+
   // 4. Dashboard CSS has the new v5.1 pieces
   assert.match(dashboardSrc, /\.v5-topnav\s*\{/, 'dashboard.css must define .v5-topnav');
   assert.match(dashboardSrc, /\.v5-topnav-item\s*\{/, 'dashboard.css must define .v5-topnav-item');
